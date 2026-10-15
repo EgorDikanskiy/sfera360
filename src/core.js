@@ -209,12 +209,13 @@ function makeTemplate(img, x, y, t) {
 }
 // поиск по окну: S берётся из j через гомографию уровня, ищем смещение o ∈ [-R,R]²
 const _hp = [0, 0];
-function searchNCC(T, t, imgJ, HL, cx, cy, R) {
+function searchNCC(T, t, imgJ, HL, cx, cy, R, sxL, syL) {
   const n = 2 * t + 1, sn = 2 * (t + R) + 1, S = new Float32Array(sn * sn);
+  sxL = sxL || 0; syL = syL || 0;
   let bad = 0;
   for (let v = 0, q = 0; v < sn; v++) for (let u = 0; u < sn; u++, q++) {
     hApply(HL, cx + u - t - R, cy + v - t - R, _hp);
-    const val = _hp[0] === _hp[0] ? sampleF(imgJ, _hp[0], _hp[1]) : NaN;
+    const val = _hp[0] === _hp[0] ? sampleF(imgJ, _hp[0] + sxL, _hp[1] + syL) : NaN;
     S[q] = val; if (val !== val) bad++;
   }
   if (bad > sn * sn * 0.5) return null;
@@ -290,7 +291,7 @@ function ransacRotation(A, B, thrRad, iters, rand) {
   }
   return { R, inliers: bestIdx };
 }
-function camRay(cam, f, x, y) { return normalize3([(x - cam.cx) / f, (y - cam.cy) / f, 1]); }
+function camRay(cam, f, x, y) { const u = undistOff(cam, x - cam.cx, y - cam.cy); return normalize3([u[0] / f, u[1] / f, 1]); }
 
 // кандидаты пар по пересечению кадров
 function overlapFraction(ci, cj, f) {
@@ -345,13 +346,21 @@ function matchPair(ci, cj, f, mode, rand) {
   const tFor = l => (l >= 2 ? 5 : l === 1 ? 6 : 8);
   const res = [];
   const use = pts.slice(0, mode === 'coarse' ? 90 : 160);
+  // с дисторсией гомография поворота неточна у краёв — добавляем поправку предсказания для каждой точки
+  const lens = mode !== 'coarse' && (ci.k1 || cj.k1);
+  const Rrel = lens ? m3mul(m3T(cj.C2W), ci.C2W) : null;
   for (const c of use) {
-    let dx = shift[0], dy = shift[1], ok = true, score = 0;
+    let dx = shift[0], dy = shift[1], ok = true, score = 0, sJ = [0, 0];
+    if (lens) {
+      const a = mv(Rrel, camRay(ci, f, c[0], c[1])); if (a[2] <= 1e-6) continue;
+      const pd = distOff(cj, f * a[0] / a[2], f * a[1] / a[2]); hApply(H, c[0], c[1], o);
+      sJ = [pd[0] + cj.cx - o[0], pd[1] + cj.cy - o[1]];
+    }
     for (let l = startL; l >= 0; l--) {
       const x = toL(c[0], kfI(l)), y = toL(c[1], kfI(l)), t = tFor(l);
       const T = makeTemplate(PI.levels[l], x, y, t); if (!T) { ok = false; break; }
       const R = l === startL ? startR : 2;
-      const r = searchNCC(T, t, PJ.levels[l], HL[l], x + dx, y + dy, R);
+      const r = searchNCC(T, t, PJ.levels[l], HL[l], x + dx, y + dy, R, sJ[0] / kfJ(l), sJ[1] / kfJ(l));
       if (!r || r.score < (l === 0 ? 0.78 : 0.55)) { ok = false; break; }
       dx += r.ox; dy += r.oy; score = r.score;
       if (l > 0) { dx *= 2; dy *= 2; }
@@ -360,7 +369,7 @@ function matchPair(ci, cj, f, mode, rand) {
     // смещение уровня 0 → полное разрешение
     const k0 = kfI(0), px = c[0] + dx * k0, py = c[1] + dy * k0;
     hApply(H, px, py, o); if (o[0] !== o[0]) continue;
-    res.push({ xi: c[0], yi: c[1], xj: o[0], yj: o[1], s: score });
+    res.push({ xi: c[0], yi: c[1], xj: o[0] + sJ[0], yj: o[1] + sJ[1], s: score });
   }
   if (res.length < 8) return { matches: [], shiftOK: mode === 'coarse' };
   // RANSAC по модели чистого вращения
@@ -389,57 +398,63 @@ function cholSolve(A, b, n) {
   for (let i = n - 1; i >= 0; i--) { let s = y[i]; for (let k = i + 1; k < n; k++) s -= L[k * n + i] * x[k]; x[i] = s / L[i * n + i]; }
   return x;
 }
-function bundleAdjust(cams, M, f0, iters) {
-  const N = cams.length, P = 3 * (N - 1) + 1, iphi = P - 1;
+// Связка поворотов: невязки лучей в пикселях, параметры — повороты (кадр 0 закреплён), log f и дисторсия k1.
+// Дисторсия: смещение от центра x_u = x_d·(1 + k1·r²/R0²), R0 — полудиагональ кадра.
+function bundleAdjust(cams, M, f0, iters, k1init) {
+  const N = cams.length, P = 3 * (N - 1) + 2, iphi = P - 2, ik1 = P - 1, R0 = cams[0].R0;
   const pIdx = c => (c === 0 ? -1 : 3 * (c - 1));
-  const sigR = 0.35, sigF = 0.25; // приоры: гироскоп ±20°, фокус ±25%
-  let phi = 0;
-  const cost = (C2Ws, ph) => {
+  const sigR = 0.35, sigF = 0.25, sigK = 0.15; // приоры: гироскоп ±20°, фокус ±25%, дисторсия ±0.15
+  let phi = 0, k1 = k1init || 0;
+  const cost = (C2Ws, ph, kk) => {
     const f = f0 * Math.exp(ph), huber = 2; let E = 0;
     for (let k = 0; k < M.n; k++) {
-      const wi = rayW(C2Ws[M.i[k]], M.xi[k], M.yi[k], f), wj = rayW(C2Ws[M.j[k]], M.xj[k], M.yj[k], f);
+      const wi = mv(C2Ws[M.i[k]], rayUK(M.xi[k], M.yi[k], f, kk, R0).u), wj = mv(C2Ws[M.j[k]], rayUK(M.xj[k], M.yj[k], f, kk, R0).u);
       const e = Math.hypot(wi[0] - wj[0], wi[1] - wj[1], wi[2] - wj[2]) * f0;
       E += e <= huber ? e * e : 2 * huber * e - huber * huber;
     }
     for (let c = 1; c < N; c++) { const l = logSO3(m3mul(C2Ws[c], m3T(cams[c].C2Wprior))); E += (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) / (sigR * sigR); }
-    return E + ph * ph / (sigF * sigF);
+    return E + ph * ph / (sigF * sigF) + kk * kk / (sigK * sigK);
   };
   let C2W = cams.map(c => m3copy(c.C2W));
-  let E = cost(C2W, phi), lambda = 1e-3;
+  let E = cost(C2W, phi, k1), lambda = 1e-3;
   for (let it = 0; it < iters; it++) {
     const A = new Float64Array(P * P), b = new Float64Array(P);
     const f = f0 * Math.exp(phi), huber = 2, S = f0; // невязки в пикселях
     for (let k = 0; k < M.n; k++) {
       const ci = M.i[k], cj = M.j[k];
-      const ui = rayU(M.xi[k], M.yi[k], f), uj = rayU(M.xj[k], M.yj[k], f);
+      const ui = rayUK(M.xi[k], M.yi[k], f, k1, R0), uj = rayUK(M.xj[k], M.yj[k], f, k1, R0);
       const Ri = C2W[ci], Rj = C2W[cj];
       const wi = mv(Ri, ui.u), wj = mv(Rj, uj.u);
       const r = [(wi[0] - wj[0]) * S, (wi[1] - wj[1]) * S, (wi[2] - wj[2]) * S];
       const e = Math.hypot(r[0], r[1], r[2]); const wt = e <= huber ? 1 : huber / e;
-      const dwi = mv(Ri, ui.du), dwj = mv(Rj, uj.du);
+      const dwi = mv(Ri, ui.du), dwj = mv(Rj, uj.du), dki = mv(Ri, ui.dk), dkj = mv(Rj, uj.dk);
       const Jf = [(dwi[0] - dwj[0]) * S, (dwi[1] - dwj[1]) * S, (dwi[2] - dwj[2]) * S];
+      const Jk = [(dki[0] - dkj[0]) * S, (dki[1] - dkj[1]) * S, (dki[2] - dkj[2]) * S];
       // Ji = -[wi]x, Jj = +[wj]x (в пикселях)
       const Ji = skew(wi, -S), Jj = skew(wj, S);
       const blocks = []; if (ci !== 0) blocks.push([pIdx(ci), Ji]); if (cj !== 0) blocks.push([pIdx(cj), Jj]);
       for (const [pa, Ja] of blocks) {
         for (let a = 0; a < 3; a++) {
           let g = 0; for (let q = 0; q < 3; q++) g += Ja[q * 3 + a] * r[q]; b[pa + a] += wt * g;
-          let gf = 0; for (let q = 0; q < 3; q++) gf += Ja[q * 3 + a] * Jf[q];
+          let gf = 0, gk = 0; for (let q = 0; q < 3; q++) { gf += Ja[q * 3 + a] * Jf[q]; gk += Ja[q * 3 + a] * Jk[q]; }
           A[(pa + a) * P + iphi] += wt * gf; A[iphi * P + pa + a] += wt * gf;
+          A[(pa + a) * P + ik1] += wt * gk; A[ik1 * P + pa + a] += wt * gk;
           for (const [pb, Jb] of blocks) for (let c = 0; c < 3; c++) {
             let s = 0; for (let q = 0; q < 3; q++) s += Ja[q * 3 + a] * Jb[q * 3 + c];
             A[(pa + a) * P + pb + c] += wt * s;
           }
         }
       }
-      b[iphi] += wt * (Jf[0] * r[0] + Jf[1] * r[1] + Jf[2] * r[2]);
-      A[iphi * P + iphi] += wt * (Jf[0] * Jf[0] + Jf[1] * Jf[1] + Jf[2] * Jf[2]);
+      const ff = Jf[0] * Jf[0] + Jf[1] * Jf[1] + Jf[2] * Jf[2], kk = Jk[0] * Jk[0] + Jk[1] * Jk[1] + Jk[2] * Jk[2], fk = Jf[0] * Jk[0] + Jf[1] * Jk[1] + Jf[2] * Jk[2];
+      b[iphi] += wt * (Jf[0] * r[0] + Jf[1] * r[1] + Jf[2] * r[2]); b[ik1] += wt * (Jk[0] * r[0] + Jk[1] * r[1] + Jk[2] * r[2]);
+      A[iphi * P + iphi] += wt * ff; A[ik1 * P + ik1] += wt * kk; A[iphi * P + ik1] += wt * fk; A[ik1 * P + iphi] += wt * fk;
     }
     for (let c = 1; c < N; c++) {
       const l = logSO3(m3mul(C2W[c], m3T(cams[c].C2Wprior))), p = pIdx(c);
       for (let a = 0; a < 3; a++) { A[(p + a) * P + p + a] += 1 / (sigR * sigR); b[p + a] += l[a] / (sigR * sigR); }
     }
     A[iphi * P + iphi] += 1 / (sigF * sigF); b[iphi] += phi / (sigF * sigF);
+    A[ik1 * P + ik1] += 1 / (sigK * sigK); b[ik1] += k1 / (sigK * sigK);
     let improved = false;
     for (let tries = 0; tries < 8 && !improved; tries++) {
       const Ad = Float64Array.from(A);
@@ -447,9 +462,9 @@ function bundleAdjust(cams, M, f0, iters) {
       const nb = b.map(v => -v);
       const dx = cholSolve(Ad, nb, P); if (!dx) { lambda *= 10; continue; }
       const C2Wn = C2W.map((R, c) => { if (c === 0) return R; const p = pIdx(c); return m3mul(expSO3(dx[p], dx[p + 1], dx[p + 2]), R); });
-      const phin = phi + dx[iphi];
-      const En = cost(C2Wn, phin);
-      if (En < E) { C2W = C2Wn; phi = phin; const rel = (E - En) / E; E = En; lambda = Math.max(1e-7, lambda / 3); improved = true; if (rel < 1e-7) it = iters; }
+      const phin = phi + dx[iphi], k1n = k1 + dx[ik1];
+      const En = cost(C2Wn, phin, k1n);
+      if (En < E) { C2W = C2Wn; phi = phin; k1 = k1n; const rel = (E - En) / E; E = En; lambda = Math.max(1e-7, lambda / 3); improved = true; if (rel < 1e-7) it = iters; }
       else lambda *= 4;
     }
     if (!improved) break;
@@ -458,10 +473,27 @@ function bundleAdjust(cams, M, f0, iters) {
   const f = f0 * Math.exp(phi); let s2 = 0;
   const per = new Float64Array(M.n);
   for (let k = 0; k < M.n; k++) {
-    const wi = rayW(C2W[M.i[k]], M.xi[k], M.yi[k], f), wj = rayW(C2W[M.j[k]], M.xj[k], M.yj[k], f);
+    const wi = mv(C2W[M.i[k]], rayUK(M.xi[k], M.yi[k], f, k1, R0).u), wj = mv(C2W[M.j[k]], rayUK(M.xj[k], M.yj[k], f, k1, R0).u);
     const e = Math.hypot(wi[0] - wj[0], wi[1] - wj[1], wi[2] - wj[2]) * f; per[k] = e; s2 += e * e;
   }
-  return { C2W, f, rms: M.n ? Math.sqrt(s2 / M.n) : 0, per };
+  return { C2W, f, k1, rms: M.n ? Math.sqrt(s2 / M.n) : 0, per };
+}
+// луч по смещению от центра (с учётом дисторсии) и производные по log f и k1
+function rayUK(x, y, f, k1, R0) {
+  const rr = (x * x + y * y) / (R0 * R0), sc = 1 + k1 * rr, xu = x * sc, yu = y * sc;
+  const vx = xu / f, vy = yu / f, n = Math.sqrt(vx * vx + vy * vy + 1);
+  const u = [vx / n, vy / n, 1 / n];
+  const dv = [-vx, -vy, 0]; const ud = u[0] * dv[0] + u[1] * dv[1];
+  const dk = [x * rr / f, y * rr / f, 0]; const uk = u[0] * dk[0] + u[1] * dk[1];
+  return { u, du: [(dv[0] - u[0] * ud) / n, (dv[1] - u[1] * ud) / n, (dv[2] - u[2] * ud) / n], dk: [(dk[0] - u[0] * uk) / n, (dk[1] - u[1] * uk) / n, (dk[2] - u[2] * uk) / n] };
+}
+// смещение от центра: искажённое → неискажённое и обратно
+function undistOff(cam, x, y) { const k1 = cam.k1 || 0; if (!k1) return [x, y]; const s = 1 + k1 * (x * x + y * y) / (cam.R0 * cam.R0); return [x * s, y * s]; }
+function distOff(cam, xu, yu) {
+  const k1 = cam.k1 || 0; if (!k1) return [xu, yu];
+  let x = xu, y = yu; const iR = 1 / (cam.R0 * cam.R0);
+  for (let it = 0; it < 5; it++) { const s = 1 + k1 * (x * x + y * y) * iR; x = xu / s; y = yu / s; }
+  return [x, y];
 }
 function rayU(x, y, f) {
   const vx = x / f, vy = y / f, n = Math.sqrt(vx * vx + vy * vy + 1);
@@ -599,13 +631,13 @@ function epipolarPoints(cams, f, pairs, report) {
     const kI = ci.pyr.k * 2, kJ = cj.pyr.k * 2, k0I = ci.pyr.k, k0J = cj.pyr.k;
     const H = pairHomography(ci, cj, f), W2Cj = m3T(cj.C2W);
     const dc = [ci.center[0] - cj.center[0], ci.center[1] - cj.center[1], ci.center[2] - cj.center[2]];
-    const proj = (v) => { const z = W2Cj[6] * v[0] + W2Cj[7] * v[1] + W2Cj[8] * v[2]; if (z <= 1e-6) return null; return [f * (W2Cj[0] * v[0] + W2Cj[1] * v[1] + W2Cj[2] * v[2]) / z + cj.cx, f * (W2Cj[3] * v[0] + W2Cj[4] * v[1] + W2Cj[5] * v[2]) / z + cj.cy]; };
+    const proj = (v) => { const z = W2Cj[6] * v[0] + W2Cj[7] * v[1] + W2Cj[8] * v[2]; if (z <= 1e-6) return null; const d = distOff(cj, f * (W2Cj[0] * v[0] + W2Cj[1] * v[1] + W2Cj[2] * v[2]) / z, f * (W2Cj[3] * v[0] + W2Cj[4] * v[1] + W2Cj[5] * v[2]) / z); return [d[0] + cj.cx, d[1] + cj.cy]; };
     let used = 0;
     for (const c of ci.corners) {
       if (used > 260) break;
       hApply(H, c[0], c[1], o); if (o[0] !== o[0]) continue;
       const m = 20; if (o[0] < -200 || o[1] < -200 || o[0] > cj.w + 200 || o[1] > cj.h + 200) continue;
-      const w = rayW(ci.C2W, c[0] - ci.cx, c[1] - ci.cy, f);
+      const uo = undistOff(ci, c[0] - ci.cx, c[1] - ci.cy), w = rayW(ci.C2W, uo[0], uo[1], f);
       // кривая кандидатов: q от 0 (бесконечность) до qMax
       const cand = []; let last = null;
       for (let qq = 0; qq <= 0.9; qq += 0.004) {
@@ -793,7 +825,8 @@ function seamLabels(cams, f, gains, depth, LW, report) {
         let dx = cl * Math.sin(lon), dy = cl * Math.cos(lon), dz = sl;
         if (par) { const q = depthAt(depth, lon, lat); dx -= q * ctr[0]; dy -= q * ctr[1]; dz -= q * ctr[2]; }
         const cz = W2C[6] * dx + W2C[7] * dy + W2C[8] * dz; if (cz <= 1e-6) continue;
-        const x = f * (W2C[0] * dx + W2C[1] * dy + W2C[2] * dz) / cz + cam.cx, y = f * (W2C[3] * dx + W2C[4] * dy + W2C[5] * dz) / cz + cam.cy;
+        const pd = distOff(cam, f * (W2C[0] * dx + W2C[1] * dy + W2C[2] * dz) / cz, f * (W2C[3] * dx + W2C[4] * dy + W2C[5] * dz) / cz);
+        const x = pd[0] + cam.cx, y = pd[1] + cam.cy;
         if (x < 1 || y < 1 || x > cam.w - 2 || y > cam.h - 2) continue;
         const cell = v * LW + u; if (nc[cell] >= K) continue;
         const wx = 1 - Math.abs((x - cam.cx) / (cam.cx + 0.5)), wy = 1 - Math.abs((y - cam.cy) / (cam.cy + 0.5));
@@ -928,22 +961,25 @@ function compose(cams, f, gains, W, progress, depth, seams) {
     const fw = camForward(c.C2W), ll = lonLatFromDir(fw);
     const ci = cams.indexOf(c);
     const sw = seams ? { hi: seamWeights(seams, ci, 1.2), lo: seamWeights(seams, ci, 2.5) } : null;
+    if (sw) sw.any = true;
     return { W2C, ctr, sw, par: depth && cn > 1e-9, czMin: Math.cos(Math.min(half + 0.02, Math.PI / 2 - 0.01)), latC: ll[1], half: half + 0.03, lb: c.low || (c.low = lowBand(c)) };
   });
-  const iDrow = new Float32Array(W);
-  const BH = 64;
+  const BH0 = 64, iDband = depth ? new Float32Array(W * BH0) : null;
+  const BH = BH0;
   const acc = new Float32Array(W * BH * 8);
   for (let v0 = 0; v0 < H; v0 += BH) {
     const v1 = Math.min(H, v0 + BH); acc.fill(0);
+    // обратная глубина зависит только от направления — считаем один раз на полосу
+    if (iDband) for (let v = v0; v < v1; v++) { const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI; for (let u = 0; u < W; u++) iDband[(v - v0) * W + u] = depthAt(depth, (u + 0.5) / W * 2 * Math.PI - Math.PI, lat); }
     for (let ci = 0; ci < cams.length; ci++) {
       const cam = cams[ci], inf = info[ci], M = inf.W2C, g = gains[ci], lb = inf.lb, rgb = cam.rgb, cw = cam.w, ch = cam.h;
       const latTop = Math.PI / 2 - (v0 + 0.5) / H * Math.PI, latBot = Math.PI / 2 - (v1 - 0.5) / H * Math.PI;
       if (latBot > inf.latC + inf.half || latTop < inf.latC - inf.half) continue;
-      const icx = 1 / (cam.cx + 0.5), icy = 1 / (cam.cy + 0.5);
+      const icx = 1 / (cam.cx + 0.5), icy = 1 / (cam.cy + 0.5), k1c = cam.k1 || 0, iR0 = 1 / ((cam.R0 || 1) * (cam.R0 || 1));
       for (let v = v0; v < v1; v++) {
         const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
         const A = M[6] * cl, B = M[7] * cl, C = M[8] * sl, Rr = Math.hypot(A, B);
-        if (inf.par) for (let u = 0; u < W; u++) iDrow[u] = depthAt(depth, (u + 0.5) / W * 2 * Math.PI - Math.PI, lat);
+        const iDoff = (v - v0) * W;
         const pc = inf.ctr, par = inf.par, SW = inf.sw;
         let sRow0 = 0, sRow1 = 0, sFy = 0, LWs = 0;
         if (SW) { LWs = seams.LW; let sy = (v + 0.5) / H * seams.LH - 0.5; if (sy < 0) sy = 0; if (sy > seams.LH - 1) sy = seams.LH - 1; const y0 = Math.min(seams.LH - 2, Math.floor(sy)); sFy = sy - y0; sRow0 = y0 * LWs; sRow1 = sRow0 + LWs; }
@@ -963,10 +999,20 @@ function compose(cams, f, gains, W, progress, depth, seams) {
         for (let kk = 0; kk < uCount; kk++) {
           let u = uStart + kk; u = ((u % W) + W) % W;
           let dx = cl * sinL[u], dy = cl * cosL[u], dz = sl;
-          if (par) { const q = iDrow[u]; dx -= q * pc[0]; dy -= q * pc[1]; dz -= q * pc[2]; }
+          let hiS = 1, loS = 1;
+          if (SW) {
+            // вне своей области шва кадр не участвует — пропускаем дорогую выборку
+            const sx = (u + 0.5) / W * LWs - 0.5, x0s = Math.floor(sx), fxs = sx - x0s, xa = ((x0s % LWs) + LWs) % LWs, xb = (xa + 1) % LWs, lo = SW.lo, hi = SW.hi;
+            loS = lo ? (lo[sRow0 + xa] * (1 - fxs) + lo[sRow0 + xb] * fxs) * (1 - sFy) + (lo[sRow1 + xa] * (1 - fxs) + lo[sRow1 + xb] * fxs) * sFy : 0;
+            hiS = hi ? (hi[sRow0 + xa] * (1 - fxs) + hi[sRow0 + xb] * fxs) * (1 - sFy) + (hi[sRow1 + xa] * (1 - fxs) + hi[sRow1 + xb] * fxs) * sFy : 0;
+            if (loS < 0.002 && hiS < 0.002 && SW.any) continue;
+          }
+          if (par) { const q = iDband[iDoff + u]; dx -= q * pc[0]; dy -= q * pc[1]; dz -= q * pc[2]; }
           const cz = M[6] * dx + M[7] * dy + M[8] * dz; if (cz <= 1e-6) continue;
           const iz = f / cz;
-          const x = (M[0] * dx + M[1] * dy + M[2] * dz) * iz + cam.cx, y = (M[3] * dx + M[4] * dy + M[5] * dz) * iz + cam.cy;
+          let x = (M[0] * dx + M[1] * dy + M[2] * dz) * iz, y = (M[3] * dx + M[4] * dy + M[5] * dz) * iz;
+          if (k1c) { const xu = x, yu = y; for (let it = 0; it < 4; it++) { const s2 = 1 + k1c * (x * x + y * y) * iR0; x = xu / s2; y = yu / s2; } }
+          x += cam.cx; y += cam.cy;
           if (x < 0 || y < 0 || x > cw - 1 || y > ch - 1) continue;
           const wx = 1 - Math.abs((x - cam.cx) * icx), wy = 1 - Math.abs((y - cam.cy) * icy);
           const w = wx * wy; if (w <= 0) continue;
@@ -989,12 +1035,7 @@ function compose(cams, f, gains, W, progress, depth, seams) {
           const o = (rowBase + u) * 8;
           const w2 = w * w, w4 = w2 * w2;
           let wl = w, wh = w4 * w4 * w2 + 1e-30;
-          if (SW) {
-            let sx = (u + 0.5) / W * LWs - 0.5; const x0 = Math.floor(sx), fx2 = sx - x0, xa = ((x0 % LWs) + LWs) % LWs, xb = (xa + 1) % LWs;
-            const bl = (m) => m ? (m[sRow0 + xa] * (1 - fx2) + m[sRow0 + xb] * fx2) * (1 - sFy) + (m[sRow1 + xa] * (1 - fx2) + m[sRow1 + xb] * fx2) * sFy : 0;
-            const hiS = bl(SW.hi), loS = bl(SW.lo), edge = Math.min(1, w * 12);
-            wl = w * (loS + 1e-3); wh = (hiS * edge + 1e-6 * wh) + 1e-30;
-          }
+          if (SW) { const edge = Math.min(1, w * 12); wl = w * (loS + 1e-3); wh = (hiS * edge + 1e-6 * wh) + 1e-30; }
           acc[o] += wl * g[0] * Lr; acc[o + 1] += wl * g[1] * Lg; acc[o + 2] += wl * g[2] * Lb; acc[o + 3] += wl;
           acc[o + 4] += wh * g[0] * (r - Lr); acc[o + 5] += wh * g[1] * (gg - Lg); acc[o + 6] += wh * g[2] * (bb - Lb); acc[o + 7] += wh;
         }
@@ -1099,7 +1140,7 @@ function stitchPanorama(frames, opts, report) {
   let f = opts.f0;
   const rand = rng(12345);
   const cams = frames.map((fr, idx) => ({
-    idx, w: fr.w, h: fr.h, rgb: fr.rgb, cx: (fr.w - 1) / 2, cy: (fr.h - 1) / 2,
+    idx, w: fr.w, h: fr.h, rgb: fr.rgb, cx: (fr.w - 1) / 2, cy: (fr.h - 1) / 2, R0: Math.hypot(fr.w, fr.h) / 2, k1: 0,
     C2W: m3copy(fr.C2W), C2Wprior: m3copy(fr.C2W)
   }));
   // 1. пирамиды и углы
@@ -1125,8 +1166,9 @@ function stitchPanorama(frames, opts, report) {
     const n = all.length, M = { n, i: new Int32Array(n), j: new Int32Array(n), xi: new Float64Array(n), yi: new Float64Array(n), xj: new Float64Array(n), yj: new Float64Array(n) };
     all.forEach(([i, j, m], k) => { M.i[k] = i; M.j[k] = j; M.xi[k] = m.xi - cams[i].cx; M.yi[k] = m.yi - cams[i].cy; M.xj[k] = m.xj - cams[j].cx; M.yj[k] = m.yj - cams[j].cy; });
     if (!n) return null;
-    const r = bundleAdjust(cams, M, f, iters);
-    cams.forEach((c, k) => { c.C2W = r.C2W[k]; }); f = r.f;
+    const r = bundleAdjust(cams, M, f, iters, cams[0].k1);
+    const k1 = Math.abs(r.k1) < 0.004 ? 0 : r.k1;
+    cams.forEach((c, k) => { c.C2W = r.C2W[k]; c.k1 = k1; }); f = r.f;
     return r;
   };
   let pairsA = [];
@@ -1151,7 +1193,7 @@ function stitchPanorama(frames, opts, report) {
   if (ba2 && opts.parallax !== false && (ba2.rms > (opts.parallaxMinRms || 1.2) || opts.parallax === true)) {
     const all = []; for (const p of pairsB) { const ms = p.matches, step = Math.max(1, ms.length / 120); for (let q = 0; q < ms.length; q += step) all.push([p.i, p.j, ms[q | 0]]); }
     const n = all.length, M = { n, i: new Int32Array(n), j: new Int32Array(n), xi: new Float64Array(n), yi: new Float64Array(n), xj: new Float64Array(n), yj: new Float64Array(n) };
-    all.forEach(([i, j, m], k) => { M.i[k] = i; M.j[k] = j; M.xi[k] = m.xi - cams[i].cx; M.yi[k] = m.yi - cams[i].cy; M.xj[k] = m.xj - cams[j].cx; M.yj[k] = m.yj - cams[j].cy; });
+    all.forEach(([i, j, m], k) => { const a = undistOff(cams[i], m.xi - cams[i].cx, m.yi - cams[i].cy), b = undistOff(cams[j], m.xj - cams[j].cx, m.yj - cams[j].cy); M.i[k] = i; M.j[k] = j; M.xi[k] = a[0]; M.yi[k] = a[1]; M.xj[k] = b[0]; M.yj[k] = b[1]; });
     say('parallax', 0);
     const r = bundleAdjustParallax(cams, M, f, 40, fr => say('parallax', fr));
     // считаем параллакс реальным, если ошибка заметно упала
@@ -1171,6 +1213,20 @@ function stitchPanorama(frames, opts, report) {
       say('depth', 1, String(ep.length));
     }
     say('parallax', 1, (pba ? pba.rms : ba2.rms).toFixed(2));
+  }
+  // 4в. кадры без пар (часто надир при съёмке с рук): дрейф гироскопа переносим с ближайших по времени связанных кадров
+  {
+    const lk = new Uint8Array(cams.length); for (const p of pairsB) { if (p.matches.length) { lk[p.i] = 1; lk[p.j] = 1; } }
+    for (let k = 0; k < cams.length; k++) {
+      if (lk[k]) continue;
+      let a = k - 1; while (a >= 0 && !lk[a]) a--;
+      let b = k + 1; while (b < cams.length && !lk[b]) b++;
+      const cands = []; if (a >= 0) cands.push([a, k - a]); if (b < cams.length) cands.push([b, b - k]);
+      if (!cands.length) continue;
+      const M = new Float64Array(9);
+      for (const [n, gap] of cands) { const corr = m3mul(cams[n].C2W, m3T(cams[n].C2Wprior)), wgt = 1 / gap; for (let q = 0; q < 9; q++) M[q] += corr[q] * wgt; }
+      cams[k].C2W = m3mul(polar3(M), cams[k].C2Wprior);
+    }
   }
   // 5. гравитация: поворачиваем решение к гироскопу (в среднем), затем ставим первый кадр в центр
   {
@@ -1206,7 +1262,7 @@ function stitchPanorama(frames, opts, report) {
     rgba: out.rgba, covered: out.covered, W: out.W, H: out.H,
     stats: {
       frames: cams.length, pairs: pairsB.length, candidates: cand.length, matches: nMatches,
-      rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
+      k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
       coverage: cov / (out.W * out.H), holes, gains: gains.map(g => g.map(v => +v.toFixed(3))), ms: Date.now() - t0
     },
     cams: cams.map(c => Array.from(c.C2W)), centers: cams.map(c => c.center || [0, 0, 0]), depth, points: opts.debugPoints ? points : undefined
