@@ -341,6 +341,9 @@ const coreSrc = $('#core-src').textContent;
 const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
+// просмотр в полном разрешении, если видеокарта держит такие текстуры
+const MAXTEX = (() => { try { const g = document.createElement('canvas').getContext('webgl'); return g ? g.getParameter(g.MAX_TEXTURE_SIZE) : 4096; } catch (e) { return 4096; } })();
+const PREVIEW_W = Math.max(2048, Math.min(isIOS ? 4096 : 8192, MAXTEX));
 const D2R = Math.PI / 180;
 
 if (!window.isSecureContext) $('#secureWarn').hidden = false;
@@ -348,15 +351,26 @@ if (!window.isSecureContext) $('#secureWarn').hidden = false;
 // ───────────── воркер склейки ─────────────
 const WORKER_GLUE = `
 let __ortSess = null;
-async function aiSession(base) {
+async function aiSession(base, onLoad) {
   if (__ortSess) return __ortSess;
   importScripts(base + 'vendor/ort/ort.wasm.min.js');
   ort.env.wasm.wasmPaths = base + 'vendor/ort/';
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
   ort.env.wasm.proxy = false;
-  __ortSess = await ort.InferenceSession.create(base + 'models/migan_pipeline_v2.onnx', { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  // модель качаем сами — чтобы показывать прогресс (≈28 МБ, дальше из кэша браузера)
+  const resp = await fetch(base + 'models/migan_pipeline_v2.onnx');
+  if (!resp.ok) throw new Error('модель недоступна (' + resp.status + ')');
+  const total = +resp.headers.get('content-length') || 28079181;
+  let buf;
+  if (resp.body && resp.body.getReader) {
+    const rd = resp.body.getReader(), parts = []; let got = 0, last = 0;
+    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; if (onLoad && got - last > 1 << 20) { last = got; onLoad(got, total); } }
+    buf = new Uint8Array(got); let o = 0; for (const p of parts) { buf.set(p, o); o += p.length; }
+  } else buf = new Uint8Array(await resp.arrayBuffer());
+  __ortSess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
   return __ortSess;
 }
+const mbNote = (stage, report) => (got, total) => report({ stage, frac: 0, note: 'нейросеть ' + (got / 1048576).toFixed(0) + '/' + (total / 1048576).toFixed(0) + ' МБ' });
 async function aiRun(base, rgba, mask, S) {
   const sess = await aiSession(base), n = S * S, img = new Uint8Array(3 * n);
   for (let i = 0; i < n; i++) { img[i] = rgba[i * 4]; img[n + i] = rgba[i * 4 + 1]; img[2 * n + i] = rgba[i * 4 + 2]; }
@@ -389,7 +403,7 @@ self.onmessage = async (e) => {
       if (hot > 0) {
         report({ stage: 'heal', frac: 0, note: 'загружаю нейросеть' });
         try {
-          await aiSession(m.opts.base);
+          await aiSession(m.opts.base, mbNote('heal', report));
           const r = await aiHealSeams(res.rgba, res.covered, res.W, res.H, res.seams, (img, mask, S) => aiRun(m.opts.base, img, mask, S), fr => report({ stage: 'heal', frac: fr }), { maxTiles: 6 });
           extra.healed = r.tiles; report({ stage: 'heal', frac: 1, note: 'мест: ' + r.tiles });
         } catch (err) { extra.aiError = String(err && err.message || err); }
@@ -398,7 +412,7 @@ self.onmessage = async (e) => {
     if (m.opts.ai && holes > 0) {
       report({ stage: 'ai', frac: 0, note: 'загружаю нейросеть' });
       try {
-        await aiSession(m.opts.base);
+        await aiSession(m.opts.base, mbNote('ai', report));
         let tiles = 0;
         const n = await aiFillHoles(res.rgba, res.covered, res.W, res.H, async (img, mask, S) => { const r = await aiRun(m.opts.base, img, mask, S); tiles++; return r; }, fr => report({ stage: 'ai', frac: fr, note: 'тайлов: ' + tiles }), {});
         extra.aiFilled = n / (res.W * res.H); extra.aiTiles = tiles;
@@ -748,7 +762,7 @@ async function stitchCaptured(frames) {
   try {
     const { out, transfer } = await decodeFrames(frames);
     const f0 = 0.75 * Math.max(out[0].w, out[0].h);
-    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }, transfer);
+    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE } }, transfer);
     lastSource = { kind: 'capture' };
     openResult(res);
   } catch (e) { show('home'); toast('Не получилось собрать: ' + e.message, 6000); }
@@ -757,7 +771,7 @@ let lastSource = null;
 $('#btnDemo').addEventListener('click', async () => {
   startProcess('Демо-зал', ['demo'].concat(STITCH_ORDER));
   $('#procSub').textContent = 'Имитирую съёмку с рук: телефон ходит по дуге вокруг тела, гироскоп дрейфует, мимо идёт человек, пол не снят. Склейка и нейросеть должны с этим справиться.';
-  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }); lastSource = { kind: 'demo' }; openResult(res); }
+  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE } }); lastSource = { kind: 'demo' }; openResult(res); }
   catch (e) { show('home'); toast('Ошибка демо: ' + e.message, 6000); }
 });
 
@@ -802,7 +816,7 @@ $('#panoGo').addEventListener('click', async () => {
   startProcess('Панорама → сфера', ['compose', 'ai', 'fill', 'preview']);
   $('#procSub').textContent = 'Перевожу полосу в equirectangular. Нейросеть продолжает края потолка и пола, дальше — плавный переход в цвет.';
   const src = { w: pano.w, h: pano.h, rgb: pano.rgb };
-  const opts = Object.assign(pano.gpano ? { mode: 'gpano', gpano: pano.gpano } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value }, { maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE });
+  const opts = Object.assign(pano.gpano ? { mode: 'gpano', gpano: pano.gpano } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value }, { maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE });
   try { const res = await runJob({ type: 'pano', src, opts }); lastSource = { kind: 'pano' }; pano.rgb = null; openResult(res); }
   catch (e) { show('home'); toast('Ошибка: ' + e.message, 6000); }
 });
