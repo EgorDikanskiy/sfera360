@@ -384,6 +384,17 @@ self.onmessage = async (e) => {
       extra = { fTrue: d.fTrue, demo: true };
     }
     let holes = 0; for (let i = 0; i < res.covered.length; i++) if (!res.covered[i]) holes++;
+    if (m.opts.ai && res.seams && res.seams.risk) {
+      let hot = 0; for (const v of res.seams.risk) if (v > 1.0) hot++;
+      if (hot > 0) {
+        report({ stage: 'heal', frac: 0, note: 'загружаю нейросеть' });
+        try {
+          await aiSession(m.opts.base);
+          const r = await aiHealSeams(res.rgba, res.covered, res.W, res.H, res.seams, (img, mask, S) => aiRun(m.opts.base, img, mask, S), fr => report({ stage: 'heal', frac: fr }), { maxTiles: 6 });
+          extra.healed = r.tiles; report({ stage: 'heal', frac: 1, note: 'мест: ' + r.tiles });
+        } catch (err) { extra.aiError = String(err && err.message || err); }
+      }
+    }
     if (m.opts.ai && holes > 0) {
       report({ stage: 'ai', frac: 0, note: 'загружаю нейросеть' });
       try {
@@ -436,6 +447,7 @@ const STAGES = {
   gains: 'Выравнивание экспозиции',
   seams: 'Швы в обход предметов и прохожих',
   compose: 'Сшивка сферы',
+  heal: 'ИИ лечит расхождения на швах',
   ai: 'ИИ дорисовывает пустоты',
   fill: 'Плавная заливка остатка',
   preview: 'Подготовка просмотра'
@@ -453,7 +465,7 @@ function onProgress(m) {
     const k = stageOrder.indexOf(li.dataset.k);
     li.className = k < idx ? 'ok' : k === idx ? 'run' : '';
   }
-  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = m.stage === 'depth' ? m.note + ' точек' : m.stage === 'ai' ? m.note : 'ошибка ' + m.note + ' px'; }
+  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = m.stage === 'depth' ? m.note + ' точек' : (m.stage === 'ai' || m.stage === 'heal') ? m.note : 'ошибка ' + m.note + ' px'; }
   const total = stageOrder.length, frac = Math.max(0, Math.min(1, m.frac || 0));
   $('#procBar').style.width = ((idx + frac) / total * 100).toFixed(1) + '%';
   curStage = m.stage;
@@ -729,7 +741,7 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'heal', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
@@ -958,6 +970,7 @@ function renderStats(res) {
   }
   add('Снято реально', (s.coverage * 100).toFixed(1) + '% сферы');
   if (s.aiFilled) add('Дорисовал ИИ', (s.aiFilled * 100).toFixed(1) + '% · ' + s.aiTiles + ' тайл.');
+  if (s.healed) add('ИИ вылечил швы', s.healed + ' мест');
   else if (s.aiError) add('ИИ', 'не загрузился');
   add('Развёртка', `${res.W}×${res.H}`);
   if (s.ms) add('Время', (s.ms / 1000).toFixed(1) + ' с');

@@ -806,7 +806,8 @@ MaxFlow.prototype.run = function (s, t) {
 // Для каждой ячейки сетки LW×LH: какие кадры её видят и какого она цвета в каждом.
 // Энергия: данные = предпочтение центра кадра + отклонение от медианы кандидатов (убирает прохожих),
 //          шов   = разница цветов двух кадров по обе стороны шва (шов идёт там, где кадры совпадают).
-function seamLabels(cams, f, gains, depth, LW, report) {
+function seamLabels(cams, f, gains, depth, LW, report, sopt) {
+  sopt = sopt || {};
   const LH = LW / 2, NC = LW * LH, K = 6, NI = cams.length;
   const candI = new Int16Array(NC * K).fill(-1), candC = new Float32Array(NC * K * 3), candW = new Float32Array(NC * K), nc = new Uint8Array(NC);
   // уменьшенные (×4) копии кадров в sRGB для сравнения цветов
@@ -850,7 +851,7 @@ function seamLabels(cams, f, gains, depth, LW, report) {
     if (useMed) for (let c = 0; c < 3; c++) { const a = tmp[c]; a.length = 0; for (let k = 0; k < n; k++) a.push(candC[(cell * K + k) * 3 + c]); a.sort((x, y) => x - y); med[c] = a[n >> 1]; }
     for (let k = 0; k < n; k++) {
       const q = cell * K + k; let d = 0.03 * (1 - candW[q]);
-      if (useMed) { const e = Math.abs(candC[q * 3] - med[0]) + Math.abs(candC[q * 3 + 1] - med[1]) + Math.abs(candC[q * 3 + 2] - med[2]); d += 1.2 * Math.max(0, e - 0.04); }
+      if (useMed) { const e = Math.abs(candC[q * 3] - med[0]) + Math.abs(candC[q * 3 + 1] - med[1]) + Math.abs(candC[q * 3 + 2] - med[2]); d += 1.2 * Math.max(0, e - (sopt.medTol != null ? sopt.medTol : 0.15)); }
       if (candW[q] < 0.08) d += 0.3 * (0.08 - candW[q]) / 0.08; // у самого края кадра — неохотно
       dataC[q] = d;
     }
@@ -859,7 +860,7 @@ function seamLabels(cams, f, gains, depth, LW, report) {
   // начальная разметка — ближайший к центру кадр
   const lab = new Int16Array(NC).fill(-1);
   for (let cell = 0; cell < NC; cell++) { let best = -1, bw = -1; for (let k = 0; k < nc[cell]; k++) { const q = cell * K + k; if (candW[q] > bw) { bw = candW[q]; best = candI[q]; } } lab[cell] = best; }
-  const BIG = 2.0, LAMS = 1.0;
+  const BIG = 2.0, LAMS = sopt.lambda != null ? sopt.lambda : 1.0;
   const colDiff = (cell, a, b) => {
     if (a === b) return 0;
     const qa = slot(cell, a), qb = slot(cell, b); if (qa < 0 || qb < 0) return BIG;
@@ -911,7 +912,20 @@ function seamLabels(cams, f, gains, depth, LW, report) {
     }
     if (!changed) break;
   }
-  return { LW, LH, lab };
+  // карта риска: шов проходит там, где соседние кадры расходятся (двоение, разрыв), или кадр спорит с медианой (прохожий)
+  const risk = new Float32Array(NC);
+  for (let p = 0; p < NC; p++) {
+    const a = lab[p]; if (a < 0) continue;
+    const v = (p / LW) | 0, u = p - v * LW;
+    for (const q of [v * LW + (u + 1) % LW, v < LH - 1 ? p + LW : -1]) {
+      if (q < 0) continue; const b = lab[q]; if (b < 0 || b === a) continue;
+      const qa = slot(p, b), qb = slot(q, a);
+      const d = (qa >= 0 ? colDiff(p, a, b) : 0) + (qb >= 0 ? colDiff(q, a, b) : 0);
+      if (d > risk[p]) risk[p] = d; if (d > risk[q]) risk[q] = d;
+    }
+    const sp = slot(p, a); if (sp >= 0 && nc[p] >= 3) { const dm = dataC[sp] / 1.2; if (dm > 0.5 && dm > risk[p]) risk[p] = dm; }
+  }
+  return { LW, LH, lab, risk };
 }
 // мягкие веса шва для кадра: размытый индикатор «эта ячейка взята из кадра i»
 function seamWeights(seams, ci, sigma) {
@@ -1251,7 +1265,7 @@ function stitchPanorama(frames, opts, report) {
   cams.forEach(c => { c.pyr = null; c.corners = null; });
   say('compose', 0);
   let seams = null;
-  if (opts.seams !== false) { say('seams', 0); seams = seamLabels(cams, f, gains, depth, opts.seamW || 512, fr => say('seams', fr)); say('seams', 1); }
+  if (opts.seams !== false) { say('seams', 0); seams = seamLabels(cams, f, gains, depth, opts.seamW || 512, fr => say('seams', fr), { lambda: opts.seamLambda, medTol: opts.seamMedTol }); say('seams', 1); }
   const out = compose(cams, f, gains, W, fr => say('compose', fr), depth, seams);
   let cov = 0; for (let i = 0; i < out.covered.length; i++) cov += out.covered[i];
   let holes = out.W * out.H - cov;
@@ -1265,6 +1279,7 @@ function stitchPanorama(frames, opts, report) {
       k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
       coverage: cov / (out.W * out.H), holes, gains: gains.map(g => g.map(v => +v.toFixed(3))), ms: Date.now() - t0
     },
+    seams: seams ? { LW: seams.LW, LH: seams.LH, risk: seams.risk, lab: opts.debugSeams ? seams.lab : undefined } : null,
     cams: cams.map(c => Array.from(c.C2W)), centers: cams.map(c => c.center || [0, 0, 0]), depth, points: opts.debugPoints ? points : undefined
   };
 }
@@ -1418,6 +1433,59 @@ async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
   }
   return filled;
 }
+// ИИ лечит швы: кластеры ячеек, где соседние кадры заметно расходятся, перерисовываются нейросетью.
+// Кластер — связная область рискованных ячеек (с расширением); тайл с запасом контекста, вклейка с мягким краем.
+async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
+  opts = opts || {};
+  const { LW, LH, risk } = seams, thr = opts.thr || 1.0, maxTiles = opts.maxTiles || 10;
+  const hot = new Uint8Array(LW * LH);
+  for (let k = 0; k < LW * LH; k++) if (risk[k] > thr) hot[k] = 1;
+  // расширяем на 1 ячейку, чтобы захватить края дефекта
+  const dil = new Uint8Array(LW * LH);
+  for (let k = 0; k < LW * LH; k++) if (hot[k]) { const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy >= 0 && yy < LH) dil[yy * LW + (x + dx + LW) % LW] = 1; } }
+  const comp = new Int32Array(LW * LH).fill(-1), comps = [];
+  for (let k0 = 0; k0 < LW * LH; k0++) {
+    if (!dil[k0] || comp[k0] >= 0) continue;
+    const id = comps.length, st = [k0], cells = []; comp[k0] = id; let mass = 0;
+    while (st.length) { const k = st.pop(); cells.push(k); mass += hot[k] ? risk[k] : 0; const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy < 0 || yy >= LH) continue; const kk = yy * LW + (x + dx + LW) % LW; if (dil[kk] && comp[kk] < 0) { comp[kk] = id; st.push(kk); } } }
+    comps.push({ cells, mass, id });
+  }
+  comps.sort((a, b) => b.mass - a.mass);
+  const cellDir = k => { const y = (k / LW) | 0, x = k - y * LW; return dirFromLonLat((x + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / LH * Math.PI); };
+  const S = opts.tile || 768, native = S / (W / (2 * Math.PI));
+  let done = 0, tiles = 0;
+  const todo = comps.filter(c => c.mass >= (opts.minMass || 4)).slice(0, maxTiles);
+  for (const c of todo) {
+    let sx = 0, sy = 0, sz = 0; for (const k of c.cells) { const d = cellDir(k); sx += d[0]; sy += d[1]; sz += d[2]; }
+    const n = Math.hypot(sx, sy, sz); if (n < 1e-6) continue; const cd = [sx / n, sy / n, sz / n];
+    let rad = 0; for (const k of c.cells) { const d = cellDir(k); rad = Math.max(rad, Math.acos(Math.max(-1, Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2])))); }
+    rad += Math.PI / LH;
+    if (rad > 35 * Math.PI / 180) continue; // слишком большой — не трогаем (лучше кистью)
+    const fov = Math.max(native, Math.min(100 * Math.PI / 180, 3 * rad + 0.1)), ll = lonLatFromDir(cd), C2W = c2wLookAt(ll[0], ll[1]);
+    const img = renderPerspective(rgba, W, H, C2W, fov, S);
+    const set = new Set(c.cells), mask = new Uint8Array(S * S).fill(255), tt = Math.tan(fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
+    let nh = 0;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const vx = (x - cc) / cc * tt, vy = (y - cc) / cc * tt, nn = Math.sqrt(vx * vx + vy * vy + 1);
+      d[0] = (C2W[0] * vx + C2W[1] * vy + C2W[2]) / nn; d[1] = (C2W[3] * vx + C2W[4] * vy + C2W[5]) / nn; d[2] = (C2W[6] * vx + C2W[7] * vy + C2W[8]) / nn;
+      const lon = Math.atan2(d[0], d[1]), lat = Math.asin(Math.max(-1, Math.min(1, d[2])));
+      const cu = Math.min(LW - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * LW))), cv = Math.min(LH - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * LH)));
+      if (set.has(cv * LW + cu)) { mask[y * S + x] = 0; nh++; }
+    }
+    if (nh < 30) continue;
+    const alpha = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let k = 0, m = 0; for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; m++; } }
+      alpha[y * S + x] = Math.min(1, 1.4 * k / m);
+    }
+    const out = await run(img, mask, S);
+    const u = applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha);
+    done += u.idx.length; tiles++;
+    if (report) report(tiles / todo.length);
+  }
+  return { pixels: done, tiles };
+}
+
 // Исправление кистью: тайл C2W/fov размером S, маска (0 — перерисовать) уже готова; out — ответ модели.
 // Возвращает копию старых пикселей для отмены.
 function applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha) {
@@ -1682,6 +1750,6 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
+  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };
