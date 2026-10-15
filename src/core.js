@@ -1228,7 +1228,23 @@ function stitchPanorama(frames, opts, report) {
     }
     say('parallax', 1, (pba ? pba.rms : ba2.rms).toFixed(2));
   }
-  // 4в. кадры без пар (часто надир при съёмке с рук): дрейф гироскопа переносим с ближайших по времени связанных кадров
+  // 4в. проверка по гироскопу: поворот между соседними по времени кадрами гироскоп знает точно (±1°).
+  // Кадр, который разошёлся с обоими соседями больше чем на 5°, скорее всего сопоставлен ошибочно — убираем его пары.
+  let suspicious = 0;
+  {
+    // относительный поворот в системе камеры (не зависит от общего дрейфа курса)
+    const relDev = (a, b) => rotAngle(m3mul(m3mul(m3T(cams[a].C2W), cams[b].C2W), m3T(m3mul(m3T(cams[a].C2Wprior), cams[b].C2Wprior)))) * 180 / Math.PI;
+    const bad = new Set();
+    for (let k = 0; k < cams.length; k++) {
+      const devs = []; if (k > 0) devs.push(relDev(k - 1, k)); if (k < cams.length - 1) devs.push(relDev(k, k + 1));
+      if (devs.length && Math.min(...devs) > (opts.gyroCheckDeg || 5)) bad.add(k);
+    }
+    if (bad.size && bad.size < cams.length / 3) {
+      suspicious = bad.size; if (opts.debugCheck) console.log("gyro-check bad", [...bad]);
+      pairsB = pairsB.filter(p => !bad.has(p.i) && !bad.has(p.j));
+    }
+  }
+  // 4г. кадры без пар (часто надир при съёмке с рук): дрейф гироскопа переносим с ближайших по времени связанных кадров
   {
     const lk = new Uint8Array(cams.length); for (const p of pairsB) { if (p.matches.length) { lk[p.i] = 1; lk[p.j] = 1; } }
     for (let k = 0; k < cams.length; k++) {
@@ -1276,7 +1292,7 @@ function stitchPanorama(frames, opts, report) {
     rgba: out.rgba, covered: out.covered, W: out.W, H: out.H,
     stats: {
       frames: cams.length, pairs: pairsB.length, candidates: cand.length, matches: nMatches,
-      k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
+      suspicious, k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
       coverage: cov / (out.W * out.H), holes, gains: gains.map(g => g.map(v => +v.toFixed(3))), ms: Date.now() - t0
     },
     seams: seams ? { LW: seams.LW, LH: seams.LH, risk: seams.risk, lab: opts.debugSeams ? seams.lab : undefined } : null,
