@@ -398,17 +398,6 @@ self.onmessage = async (e) => {
       extra = { fTrue: d.fTrue, demo: true };
     }
     let holes = 0; for (let i = 0; i < res.covered.length; i++) if (!res.covered[i]) holes++;
-    if (m.opts.ai && res.seams && res.seams.risk) {
-      let hot = 0; for (const v of res.seams.risk) if (v > 1.0) hot++;
-      if (hot > 0) {
-        report({ stage: 'heal', frac: 0, note: 'загружаю нейросеть' });
-        try {
-          await aiSession(m.opts.base, mbNote('heal', report));
-          const r = await aiHealSeams(res.rgba, res.covered, res.W, res.H, res.seams, (img, mask, S) => aiRun(m.opts.base, img, mask, S), fr => report({ stage: 'heal', frac: fr }), { maxTiles: 6 });
-          extra.healed = r.tiles; report({ stage: 'heal', frac: 1, note: 'мест: ' + r.tiles });
-        } catch (err) { extra.aiError = String(err && err.message || err); }
-      }
-    }
     if (m.opts.ai && holes > 0) {
       report({ stage: 'ai', frac: 0, note: 'загружаю нейросеть' });
       try {
@@ -420,6 +409,18 @@ self.onmessage = async (e) => {
     }
     report({ stage: 'fill', frac: 0 });
     extra.flatFilled = fillHoles(res.rgba, res.covered, res.W, res.H) / (res.W * res.H);
+    if (m.opts.ai && res.seams && res.seams.risk) {
+      let hot = 0; for (const v of res.seams.risk) if (v > 1.0) hot++;
+      if (hot > 0) {
+        report({ stage: 'heal', frac: 0, note: 'загружаю нейросеть' });
+        try {
+          await aiSession(m.opts.base, mbNote('heal', report));
+          const r = await aiHealSeams(res.rgba, res.covered, res.W, res.H, res.seams, (img, mask, S) => aiRun(m.opts.base, img, mask, S), fr => report({ stage: 'heal', frac: fr }), { maxTiles: 6 });
+          extra.healed = r.tiles; report({ stage: 'heal', frac: 1, note: 'мест: ' + r.tiles });
+        } catch (err) { extra.aiError = String(err && err.message || err); }
+      }
+    }
+
     report({ stage: 'preview', frac: 0 });
     const PW = Math.min(res.W, m.opts.previewW || 4096);
     const pv = downscaleRGBA(res.rgba, res.W, res.H, PW);
@@ -755,7 +756,7 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'heal', 'ai', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'heal', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;

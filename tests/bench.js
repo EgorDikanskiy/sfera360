@@ -33,10 +33,15 @@ const look = (wx, wy, wz, fov) => { const d = [wx, wy, wz], n0 = Math.hypot(...d
 const views = { vitrine: look(-1.3, 1.1, -0.6, 55 * Math.PI / 180), column: look(2.2, 1.6, 0.2, 60 * Math.PI / 180), bench: look(-0.6, -3.0, -0.8, 70 * Math.PI / 180), wall: look(0, 6.5, 0.3, 50 * Math.PI / 180) };
 const raw = (name, buf, w, h) => { fs.writeFileSync(OUT + name + '.rgba', Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength)); return [OUT + name + '.rgba', w, h]; };
 const files = [];
+const viewPsnr = {};
 for (const [k, [Cv, fov]] of Object.entries(views)) {
-  files.push(raw(`${tag}_${k}`, C.renderPerspective(res.rgba, W, H, Cv, fov, 400), 400, 400));
-  files.push(raw(`gt_${k}`, C.renderPerspective(gt, W, H, Cv, fov, 400), 400, 400));
+  const a = C.renderPerspective(res.rgba, W, H, Cv, fov, 400), b = C.renderPerspective(gt, W, H, Cv, fov, 400);
+  let e2 = 0, m = 0; for (let i = 0; i < a.length; i += 4) for (let q = 0; q < 3; q++) { const e = a[i + q] - b[i + q]; e2 += e * e; m++; }
+  viewPsnr[k] = +(10 * Math.log10(65025 / (e2 / m))).toFixed(2);
+  files.push(raw(`${tag}_${k}`, a, 400, 400));
+  files.push(raw(`gt_${k}`, b, 400, 400));
 }
+console.log(`[${tag}] views PSNR`, JSON.stringify(viewPsnr));
 files.push(raw(`${tag}_erp`, res.rgba, W, H));
 execFileSync('python3', ['-I', '-c', `
 import sys
