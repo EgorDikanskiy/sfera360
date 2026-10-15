@@ -1080,12 +1080,13 @@ function downscaleRGBA(rgba, W, H, PW) {
   return { rgba: out, w: PW, h: PH };
 }
 function downscaleMask(covered, W, H, PW) {
-  const PH = PW / 2, out = new Uint8Array(PW * PH), s = W / PW;
+  // два канала: [доля «не снято» (залито или ИИ), доля «дорисовано ИИ»]
+  const PH = PW / 2, out = new Uint8Array(PW * PH * 2), s = W / PW;
   for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
-    let c = 0, n = 0;
+    let real = 0, ai = 0, n = 0;
     const ya = Math.floor(y * s), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * s))), xa = Math.floor(x * s), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * s)));
-    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { c += covered[yy * W + xx]; n++; }
-    out[y * PW + x] = Math.round(255 * (1 - c / n));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const v = covered[yy * W + xx]; if (v === 1) real++; else if (v >= 2) ai++; n++; }
+    out[(y * PW + x) * 2] = Math.round(255 * (n - real) / n); out[(y * PW + x) * 2 + 1] = Math.round(255 * ai / n);
   }
   return out;
 }
@@ -1196,10 +1197,9 @@ function stitchPanorama(frames, opts, report) {
   let seams = null;
   if (opts.seams !== false) { say('seams', 0); seams = seamLabels(cams, f, gains, depth, opts.seamW || 512, fr => say('seams', fr)); say('seams', 1); }
   const out = compose(cams, f, gains, W, fr => say('compose', fr), depth, seams);
-  say('fill', 0);
   let cov = 0; for (let i = 0; i < out.covered.length; i++) cov += out.covered[i];
-  const holes = fillHoles(out.rgba, out.covered, out.W, out.H);
-  say('fill', 1);
+  let holes = out.W * out.H - cov;
+  if (!opts.deferFill) { say('fill', 0); holes = fillHoles(out.rgba, out.covered, out.W, out.H); say('fill', 1); }
   const nMatches = pairsB.reduce((s, p) => s + p.matches.length, 0);
   const hfovMax = 2 * Math.atan(Math.max(...cams.map(c => Math.max(c.w, c.h))) / 2 / f) * 180 / Math.PI;
   return {
@@ -1258,6 +1258,127 @@ function forEachErpInView(W, H, C2W, fov, size, cb) {
       cb(v * W + u, x, y);
     }
   }
+}
+
+// ───────────────────────── ИИ-дорисовка пустот ─────────────────────────
+// covered: 0 — нет снимка, 1 — реальный кадр, 2 — дорисовано ИИ. run(tileRGBA, mask(0 — дорисовать), S) → Promise<RGBA S×S>.
+// Мелкие пустоты — отдельным тайлом по их центру; большие (потолок/пол) — гранями куба, сначала те, где больше контекста.
+async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
+  opts = opts || {};
+  const LW = 256, LH = 128, hole = new Uint8Array(LW * LH);
+  let any = 0;
+  for (let v = 0; v < H; v++) { const y = Math.min(LH - 1, (v * LH / H) | 0); for (let u = 0; u < W; u += 2) if (!covered[v * W + u]) { const k = y * LW + Math.min(LW - 1, (u * LW / W) | 0); if (!hole[k]) { hole[k] = 1; any++; } } }
+  if (!any) return 0;
+  const cellDir = k => { const y = (k / LW) | 0, x = k - y * LW; return dirFromLonLat((x + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / LH * Math.PI); };
+  // угловое расстояние каждой пустой ячейки до снятого (Дейкстра по сетке)
+  const dist = new Float32Array(LW * LH).fill(Infinity), cellH = Math.PI / LH;
+  const heap = [];
+  const push = (k, d) => { heap.push([d, k]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  for (let k = 0; k < LW * LH; k++) if (!hole[k]) { dist[k] = 0; push(k, 0); }
+  while (heap.length) {
+    const [d, k] = pop(); if (d > dist[k]) continue;
+    const y = (k / LW) | 0, x = k - y * LW, cw = Math.max(0.02, Math.cos(Math.PI / 2 - (y + 0.5) / LH * Math.PI)) * 2 * Math.PI / LW;
+    for (const [dx, dy, c] of [[1, 0, cw], [-1, 0, cw], [0, 1, cellH], [0, -1, cellH]]) {
+      const yy = y + dy; if (yy < 0 || yy >= LH) continue; const kk = yy * LW + (x + dx + LW) % LW, nd = d + c;
+      if (nd < dist[kk]) { dist[kk] = nd; push(kk, nd); }
+    }
+  }
+  // компоненты связности (с переходом через ±180°)
+  const comp = new Int32Array(LW * LH).fill(-1), comps = [];
+  for (let k0 = 0; k0 < LW * LH; k0++) {
+    if (!hole[k0] || comp[k0] >= 0) continue;
+    const id = comps.length, stack = [k0], cells = []; comp[k0] = id;
+    while (stack.length) {
+      const k = stack.pop(); cells.push(k); const y = (k / LW) | 0, x = k - y * LW;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy; if (yy < 0 || yy >= LH) continue; const xx = (x + dx + LW) % LW, kk = yy * LW + xx;
+        if (hole[kk] && comp[kk] < 0) { comp[kk] = id; stack.push(kk); }
+      }
+    }
+    comps.push(cells);
+  }
+  const reach = (opts.reach || 15) * Math.PI / 180;
+  const eligible = new Uint8Array(LW * LH); // ячейки, которые ИИ имеет право дорисовать
+  const tiles = [];
+  for (const cells of comps) {
+    let sx = 0, sy = 0, sz = 0, wsum = 0, maxd = 0;
+    for (const k of cells) { const d = cellDir(k), a = Math.max(0.05, Math.sqrt(1 - d[2] * d[2])); sx += d[0] * a; sy += d[1] * a; sz += d[2] * a; wsum += a; maxd = Math.max(maxd, dist[k]); }
+    const n = Math.hypot(sx, sy, sz), c = [sx / n, sy / n, sz / n];
+    let rad = 0; for (const k of cells) { const d = cellDir(k); rad = Math.max(rad, Math.acos(Math.max(-1, Math.min(1, d[0] * c[0] + d[1] * c[1] + d[2] * c[2])))); }
+    rad += 1.5 * cellH;
+    if (n / wsum > 0.5 && rad < 40 * Math.PI / 180) {
+      // небольшая пустота — целиком одним тайлом с запасом контекста
+      for (const k of cells) eligible[k] = 1;
+      const ll = lonLatFromDir(c);
+      tiles.push({ lon: ll[0], lat: ll[1], fov: Math.max((opts.minFov || 60) * Math.PI / 180, Math.min(110 * Math.PI / 180, (opts.fovScale || 4) * rad + 0.2)), area: cells.length });
+    } else {
+      // большая (потолок/пол у панорамы с телефона) — продолжаем текстуру полосой вдоль края снятого
+      const todo = [];
+      for (const k of cells) if (dist[k] <= reach) { eligible[k] = 1; if (dist[k] >= reach * 0.25 && dist[k] <= reach * 0.75) todo.push(k); }
+      const F = 110 * Math.PI / 180, cover = 0.7 * F / 2, used = new Uint8Array(todo.length);
+      for (let a0 = 0; a0 < todo.length; a0++) {
+        if (used[a0]) continue;
+        const d0 = cellDir(todo[a0]);
+        // центр тайла — чуть в сторону снятого, чтобы в кадре был контекст
+        for (let b0 = a0; b0 < todo.length; b0++) { if (used[b0]) continue; const d = cellDir(todo[b0]); if (d[0] * d0[0] + d[1] * d0[1] + d[2] * d0[2] > Math.cos(cover)) used[b0] = 1; }
+        const ll = lonLatFromDir(d0), toward = ll[1] > 0 ? -1 : 1;
+        tiles.push({ lon: ll[0], lat: ll[1] + toward * reach * 0.6, fov: F, area: 1e9 });
+      }
+    }
+  }
+  tiles.sort((a, b) => a.area - b.area);
+  const S = opts.tile || 768;
+  let filled = 0;
+  const elig = (u, v) => eligible[Math.min(LH - 1, (v * LH / H) | 0) * LW + Math.min(LW - 1, (u * LW / W) | 0)];
+  for (let t = 0; t < tiles.length; t++) {
+    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat);
+    const img = renderPerspective(rgba, W, H, C2W, T.fov, S);
+    // маска: 0 там, где на сфере пусто (с расширением на 2 px); недоступное ИИ — тоже маскируем, но не записываем
+    const raw = new Uint8Array(S * S), tt = Math.tan(T.fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
+    let nh = 0;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const vx = (x - cc) / cc * tt, vy = (y - cc) / cc * tt, nn = Math.sqrt(vx * vx + vy * vy + 1);
+      d[0] = (C2W[0] * vx + C2W[1] * vy + C2W[2]) / nn; d[1] = (C2W[3] * vx + C2W[4] * vy + C2W[5]) / nn; d[2] = (C2W[6] * vx + C2W[7] * vy + C2W[8]) / nn;
+      const lon = Math.atan2(d[0], d[1]), lat = Math.asin(Math.max(-1, Math.min(1, d[2])));
+      const u = Math.min(W - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * W))), v = Math.min(H - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * H)));
+      if (!covered[v * W + u]) { raw[y * S + x] = 1; if (elig(u, v)) nh++; }
+    }
+    if (nh < 30) { if (report) report((t + 1) / tiles.length); continue; }
+    const mask = new Uint8Array(S * S).fill(255), R = 2;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      if (!raw[y * S + x]) continue;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) mask[yy * S + xx] = 0; }
+    }
+    const out = await run(img, mask, S);
+    forEachErpInView(W, H, C2W, T.fov, S, (idx, x, y) => {
+      if (covered[idx]) return;
+      const v = (idx / W) | 0, u = idx - v * W; if (!elig(u, v)) return;
+      const x0 = Math.min(S - 2, Math.floor(x)), y0 = Math.min(S - 2, Math.floor(y)), fx = x - x0, fy = y - y0, p = (y0 * S + x0) * 4, o = idx * 4;
+      for (let c = 0; c < 3; c++) rgba[o + c] = (out[p + c] * (1 - fx) + out[p + 4 + c] * fx) * (1 - fy) + (out[p + S * 4 + c] * (1 - fx) + out[p + S * 4 + 4 + c] * fx) * fy;
+      rgba[o + 3] = 255; covered[idx] = 2; filled++;
+    });
+    if (report) report((t + 1) / tiles.length);
+  }
+  return filled;
+}
+// Исправление кистью: тайл C2W/fov размером S, маска (0 — перерисовать) уже готова; out — ответ модели.
+// Возвращает копию старых пикселей для отмены.
+function applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha) {
+  const undo = { idx: [], px: [], cov: [] };
+  forEachErpInView(W, H, C2W, fov, S, (idx, x, y) => {
+    const x0 = Math.min(S - 2, Math.floor(x)), y0 = Math.min(S - 2, Math.floor(y)), fx = x - x0, fy = y - y0;
+    const a = (alpha[y0 * S + x0] * (1 - fx) + alpha[y0 * S + x0 + 1] * fx) * (1 - fy) + (alpha[(y0 + 1) * S + x0] * (1 - fx) + alpha[(y0 + 1) * S + x0 + 1] * fx) * fy;
+    if (a <= 0.002) return;
+    const p = (y0 * S + x0) * 4, o = idx * 4;
+    undo.idx.push(idx); undo.px.push(rgba[o], rgba[o + 1], rgba[o + 2]); undo.cov.push(covered[idx]);
+    for (let c = 0; c < 3; c++) {
+      const v = (out[p + c] * (1 - fx) + out[p + 4 + c] * fx) * (1 - fy) + (out[p + S * 4 + c] * (1 - fx) + out[p + S * 4 + 4 + c] * fx) * fy;
+      rgba[o + c] = rgba[o + c] * (1 - a) + v * a;
+    }
+    if (a > 0.5) covered[idx] = 3;
+  });
+  return undo;
 }
 
 // ───────────────────────── панорама телефона → сфера ─────────────────────────
@@ -1332,8 +1453,8 @@ function phonePanoToERP(src, opts, report) {
   }
   for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
   let cov = 0; for (let i = 0; i < covered.length; i++) cov += covered[i];
-  if (report) report({ stage: 'fill', frac: 0 });
-  const holes = fillHoles(rgba, covered, W, H);
+  let holes = W * H - cov;
+  if (!opts.deferFill) { if (report) report({ stage: 'fill', frac: 0 }); holes = fillHoles(rgba, covered, W, H); }
   return { rgba, covered, W, H, stats: { frames: 1, coverage: cov / (W * H), holes } };
 }
 function bilinRGB(rgb, w, h, x, y, out, o) {
@@ -1468,7 +1589,8 @@ function renderDemoFrames(opts, report) {
   const rand = rng(opts.seed || 7);
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rand(); return (s - 3) * 0.7; };
   const hf = 2 * Math.atan(w / 2 / fTrue) * 180 / Math.PI, vf = 2 * Math.atan(h / 2 / fTrue) * 180 / Math.PI;
-  const plan = makePlan(hf, vf, 0.36);
+  let plan = makePlan(hf, vf, 0.36);
+  if (opts.skipNadir) plan = plan.filter(t => !(t.pole && t.pitch < 0));
   const d2r = Math.PI / 180, frames = [];
   const hh = opts.handheld || 0, k1 = opts.k1 || 0;
   let drift = 0;
@@ -1504,6 +1626,6 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  makePlan, c2wLookAt, stitchPanorama, depthAt, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
+  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };

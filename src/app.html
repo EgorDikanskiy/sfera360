@@ -143,6 +143,14 @@ footer.note { text-align: left; }
 .pill.good { background: rgba(63,191,134,.18); color: #8de8bd; }
 .pill.mid { background: rgba(242,181,68,.18); color: #f5cd7d; }
 .pill.poor { background: rgba(217,87,63,.2); color: #f39a88; }
+.brush-bar { display: grid; gap: 8px; }
+.brush-hint { margin: 0; font-size: 14px; color: var(--vf-muted); }
+.brush-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.brush-ctrl input[type=range] { flex: 1; min-width: 90px; accent-color: #9b7bff; }
+.brush-ctrl label { font-size: 12px; color: var(--vf-muted); }
+#brushCv { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.ai-busy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(14,18,24,.82); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-weight: 600; font-size: 14px; }
+.ai-busy .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #9b7bff; border-right-color: transparent; animation: spin .8s linear infinite; }
 .nadir-row { display: flex; gap: 8px; align-items: center; }
 .nadir-row input[type=text] { flex: 1; min-width: 0; min-height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: #0f141a; color: var(--vf-ink); padding: 0 12px; font: inherit; font-size: 15px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); transform: translateX(-50%); background: #1d252e; color: #eef1f4; border: 1px solid rgba(255,255,255,.14); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; }
@@ -188,7 +196,7 @@ footer.note { text-align: left; }
         <button id="btnDemo" class="btn">Демо-зал</button>
       </div>
       <input id="panoFile" type="file" accept="image/*" hidden>
-      <p class="note">«Панорама из галереи» превращает обычный снимок в режиме «Панорама» в сферу: полосу ставит на место, потолок и пол заливает. «Демо-зал» показывает всю склейку на имитации съёмки — подходит для компьютера.</p>
+      <p class="note">«Панорама из галереи» превращает обычный снимок в режиме «Панорама» в сферу: полосу ставит на место, края потолка и пола продолжает нейросетью. «Демо-зал» показывает всю склейку на имитации съёмки с рук — подходит для компьютера.</p>
     </div>
 
     <div class="sect">
@@ -225,12 +233,13 @@ footer.note { text-align: left; }
           </div>
           <span class="note">«Авто» подбирает ширину по фокусному расстоянию камеры, чтобы не растягивать пиксели.</span>
         </div>
+        <label class="check"><input type="checkbox" id="optAI" checked><span>ИИ-дорисовка пустот<small>Нейросеть MI-GAN работает прямо в телефоне. При первом запуске скачивается около 40 МБ, потом берётся из кэша.</small></span></label>
         <label class="check"><input type="checkbox" id="optLock" checked><span>Фиксировать экспозицию и баланс белого<small>Если камера разрешает. Иначе яркость выровняется при склейке.</small></span></label>
         <label class="check"><input type="checkbox" id="optVibe" checked><span>Вибрация при снимке<small>Только Android.</small></span></label>
       </div>
     </div>
 
-    <footer class="note">Склейка идёт прямо в браузере, фотографии никуда не отправляются. Порядок: опорные точки → совмещение с поправкой дрейфа гироскопа → связка всех кадров с подбором фокуса → выравнивание экспозиции → двухполосное смешивание → equirectangular 2:1 с метаданными GPano.</footer>
+    <footer class="note">Склейка и нейросеть работают прямо в браузере, фотографии никуда не отправляются. Порядок: опорные точки → совмещение с поправкой дрейфа гироскопа → связка кадров с подбором фокуса → если телефон двигался, связка с параллаксом и глубина сцены → выравнивание экспозиции → швы в обход предметов (graph cut) → двухполосное смешивание → ИИ-дорисовка пустот → equirectangular 2:1 с метаданными GPano.</footer>
   </div>
 </section>
 
@@ -285,6 +294,8 @@ footer.note { text-align: left; }
   <div id="viewer-wrap">
     <canvas id="viewer" aria-label="Просмотр панорамы 360°: перетаскивайте, чтобы осмотреться"></canvas>
     <canvas id="flat" hidden></canvas>
+    <canvas id="brushCv" hidden></canvas>
+    <div class="ai-busy" id="aiBusy" hidden><span class="spin"></span><span id="aiBusyTxt">Нейросеть дорисовывает…</span></div>
     <div class="vtop">
       <button class="icon-btn" id="resHome" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button>
       <span class="spacer"></span>
@@ -297,9 +308,19 @@ footer.note { text-align: left; }
       <button class="tool" id="tShare" hidden>Поделиться</button>
       <button class="tool" id="tGyro" aria-pressed="false">Гироскоп</button>
       <button class="tool" id="tFlat" aria-pressed="false">Развёртка</button>
+      <button class="tool" id="tBrush" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-9 9H5v-6z"/><path d="M12 6l6 6"/></svg>ИИ-кисть</button>
       <button class="tool" id="tMask" aria-pressed="false">Дорисованное</button>
       <button class="tool" id="tNadir" aria-pressed="false">Табличка на полу</button>
       <button class="tool" id="tAgain">Снять заново</button>
+    </div>
+    <div class="brush-bar" id="brushBar" hidden>
+      <p class="brush-hint" id="brushHint">Закрасьте пальцем место с искажением — двоение, разрыв, человека — и нажмите «Дорисовать».</p>
+      <div class="brush-ctrl">
+        <label for="brushSize" class="mono">кисть</label><input type="range" id="brushSize" min="10" max="70" value="28">
+        <button class="tool" id="bClear">Стереть</button>
+        <button class="tool" id="bUndo" disabled>Отменить</button>
+        <button class="tool main" id="bApply">Дорисовать</button>
+      </div>
     </div>
     <div class="nadir-row" id="nadirRow" hidden>
       <input type="text" id="nadirText" maxlength="40" value="Музей · виртуальный тур" aria-label="Текст таблички на надире">
@@ -317,7 +338,7 @@ const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup',
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
-const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod };'))();
+const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
 const D2R = Math.PI / 180;
@@ -326,24 +347,61 @@ if (!window.isSecureContext) $('#secureWarn').hidden = false;
 
 // ───────────── воркер склейки ─────────────
 const WORKER_GLUE = `
-self.onmessage = (e) => {
+let __ortSess = null;
+async function aiSession(base) {
+  if (__ortSess) return __ortSess;
+  importScripts(base + 'vendor/ort/ort.wasm.min.js');
+  ort.env.wasm.wasmPaths = base + 'vendor/ort/';
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+  ort.env.wasm.proxy = false;
+  __ortSess = await ort.InferenceSession.create(base + 'models/migan_pipeline_v2.onnx', { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  return __ortSess;
+}
+async function aiRun(base, rgba, mask, S) {
+  const sess = await aiSession(base), n = S * S, img = new Uint8Array(3 * n);
+  for (let i = 0; i < n; i++) { img[i] = rgba[i * 4]; img[n + i] = rgba[i * 4 + 1]; img[2 * n + i] = rgba[i * 4 + 2]; }
+  const o = await sess.run({ image: new ort.Tensor('uint8', img, [1, 3, S, S]), mask: new ort.Tensor('uint8', mask, [1, 1, S, S]) });
+  const r = o.result.data, out = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) { out[i * 4] = r[i]; out[i * 4 + 1] = r[n + i]; out[i * 4 + 2] = r[2 * n + i]; out[i * 4 + 3] = 255; }
+  return out;
+}
+self.onmessage = async (e) => {
   const m = e.data;
   const report = r => self.postMessage({ type: 'progress', stage: r.stage, frac: r.frac, note: r.note });
   try {
-    let res, extra = {};
-    if (m.type === 'stitch') res = stitchPanorama(m.frames, m.opts, report);
-    else if (m.type === 'pano') res = phonePanoToERP(m.src, m.opts, report);
-    else if (m.type === 'demo') {
-      const d = renderDemoFrames({ seed: m.seed }, report);
-      res = stitchPanorama(d.frames, Object.assign({ f0: d.f0 }, m.opts), report);
-      extra = { fTrue: d.fTrue };
+    if (m.type === 'inpaint') {
+      const out = await aiRun(m.base, m.img, m.mask, m.S);
+      self.postMessage({ type: 'done', out }, [out.buffer]);
+      return;
     }
+    let res, extra = {};
+    const o = Object.assign({}, m.opts, { deferFill: true });
+    if (m.type === 'stitch') res = stitchPanorama(m.frames, o, report);
+    else if (m.type === 'pano') res = phonePanoToERP(m.src, o, report);
+    else if (m.type === 'demo') {
+      const d = renderDemoFrames({ seed: m.seed, handheld: 0.12, person: true, skipNadir: true }, report);
+      res = stitchPanorama(d.frames, Object.assign({ f0: d.f0 }, o), report);
+      extra = { fTrue: d.fTrue, demo: true };
+    }
+    let holes = 0; for (let i = 0; i < res.covered.length; i++) if (!res.covered[i]) holes++;
+    if (m.opts.ai && holes > 0) {
+      report({ stage: 'ai', frac: 0, note: 'загружаю нейросеть' });
+      try {
+        await aiSession(m.opts.base);
+        let tiles = 0;
+        const n = await aiFillHoles(res.rgba, res.covered, res.W, res.H, async (img, mask, S) => { const r = await aiRun(m.opts.base, img, mask, S); tiles++; return r; }, fr => report({ stage: 'ai', frac: fr, note: 'тайлов: ' + tiles }), {});
+        extra.aiFilled = n / (res.W * res.H); extra.aiTiles = tiles;
+      } catch (err) { extra.aiError = String(err && err.message || err); }
+    }
+    report({ stage: 'fill', frac: 0 });
+    extra.flatFilled = fillHoles(res.rgba, res.covered, res.W, res.H) / (res.W * res.H);
     report({ stage: 'preview', frac: 0 });
     const PW = Math.min(res.W, m.opts.previewW || 4096);
     const pv = downscaleRGBA(res.rgba, res.W, res.H, PW);
-    const mask = downscaleMask(res.covered, res.W, res.H, Math.min(res.W, 2048));
+    const MW = Math.min(res.W, 2048), mask = downscaleMask(res.covered, res.W, res.H, MW);
     const pvBuf = pv.rgba === res.rgba ? pv.rgba.slice() : pv.rgba;
-    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: Math.min(res.W, 2048), stats: Object.assign(res.stats, extra) }, [res.rgba.buffer, pvBuf.buffer, mask.buffer]);
+    const stats = Object.assign(res.stats, extra);
+    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, covered: res.covered, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: MW, stats }, [res.rgba.buffer, res.covered.buffer, pvBuf.buffer, mask.buffer]);
   } catch (err) { self.postMessage({ type: 'error', message: String(err && err.message || err) }); }
 };`;
 let worker = null;
@@ -361,6 +419,8 @@ function runJob(msg, transfer) {
     worker.postMessage(msg, transfer || []);
   });
 }
+const BASE = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
+const aiOn = () => $('#optAI').checked;
 function outWidth() { const v = +document.querySelector('input[name=res]:checked').value; return v ? Math.min(v, MAXW) : 0; }
 
 // ───────────── экран обработки ─────────────
@@ -371,9 +431,13 @@ const STAGES = {
   ba1: 'Первая связка кадров',
   match2: 'Точное совмещение',
   ba2: 'Связка всех кадров и подбор фокуса',
+  parallax: 'Параллакс: телефон двигался',
+  depth: 'Глубина сцены по эпиполярным линиям',
   gains: 'Выравнивание экспозиции',
+  seams: 'Швы в обход предметов и прохожих',
   compose: 'Сшивка сферы',
-  fill: 'Заполнение пустот',
+  ai: 'ИИ дорисовывает пустоты',
+  fill: 'Плавная заливка остатка',
   preview: 'Подготовка просмотра'
 };
 let stageOrder = [], curStage = null;
@@ -389,7 +453,7 @@ function onProgress(m) {
     const k = stageOrder.indexOf(li.dataset.k);
     li.className = k < idx ? 'ok' : k === idx ? 'run' : '';
   }
-  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = 'ошибка ' + m.note + ' px'; }
+  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = m.stage === 'depth' ? m.note + ' точек' : m.stage === 'ai' ? m.note : 'ошибка ' + m.note + ' px'; }
   const total = stageOrder.length, frac = Math.max(0, Math.min(1, m.frac || 0));
   $('#procBar').style.width = ((idx + frac) / total * 100).toFixed(1) + '%';
   curStage = m.stage;
@@ -665,14 +729,14 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'gains', 'compose', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
   try {
     const { out, transfer } = await decodeFrames(frames);
     const f0 = 0.75 * Math.max(out[0].w, out[0].h);
-    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: 4096 } }, transfer);
+    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }, transfer);
     lastSource = { kind: 'capture' };
     openResult(res);
   } catch (e) { show('home'); toast('Не получилось собрать: ' + e.message, 6000); }
@@ -680,8 +744,8 @@ async function stitchCaptured(frames) {
 let lastSource = null;
 $('#btnDemo').addEventListener('click', async () => {
   startProcess('Демо-зал', ['demo'].concat(STITCH_ORDER));
-  $('#procSub').textContent = 'Имитирую съёмку телефоном: 33 кадра с дрейфом гироскопа, разной экспозицией и виньетированием, потом склеиваю.';
-  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: 4096 } }); lastSource = { kind: 'demo' }; openResult(res); }
+  $('#procSub').textContent = 'Имитирую съёмку с рук: телефон ходит по дуге вокруг тела, гироскоп дрейфует, мимо идёт человек, пол не снят. Склейка и нейросеть должны с этим справиться.';
+  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }); lastSource = { kind: 'demo' }; openResult(res); }
   catch (e) { show('home'); toast('Ошибка демо: ' + e.message, 6000); }
 });
 
@@ -723,10 +787,10 @@ $('#panoV').addEventListener('input', e => { $('#panoVv').textContent = e.target
 $('#panoBack').addEventListener('click', () => { pano.rgb = null; show('home'); });
 $('#panoGo').addEventListener('click', async () => {
   if (!pano.rgb) return;
-  startProcess('Панорама → сфера', ['compose', 'fill', 'preview']);
-  $('#procSub').textContent = 'Перевожу цилиндрическую полосу в equirectangular и заливаю потолок и пол.';
+  startProcess('Панорама → сфера', ['compose', 'ai', 'fill', 'preview']);
+  $('#procSub').textContent = 'Перевожу полосу в equirectangular. Нейросеть продолжает края потолка и пола, дальше — плавный переход в цвет.';
   const src = { w: pano.w, h: pano.h, rgb: pano.rgb };
-  const opts = pano.gpano ? { mode: 'gpano', gpano: pano.gpano, maxW: MAXW, previewW: 4096 } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value, maxW: MAXW, previewW: 4096 };
+  const opts = Object.assign(pano.gpano ? { mode: 'gpano', gpano: pano.gpano } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value }, { maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE });
   try { const res = await runJob({ type: 'pano', src, opts }); lastSource = { kind: 'pano' }; pano.rgb = null; openResult(res); }
   catch (e) { show('home'); toast('Ошибка: ' + e.message, 6000); }
 });
@@ -741,7 +805,7 @@ vec3 look(vec3 d){
   float lon = atan(d.x, d.y); float lat = asin(clamp(d.z, -1., 1.));
   vec2 uv = vec2(lon / 6.2831853 + .5, .5 - lat / 3.1415927);
   vec3 c = texture2D(uTex, uv).rgb;
-  if (uMaskOn > .5) { float m = texture2D(uMask, uv).r; float st = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 16.)); c = mix(c, mix(c * .5, vec3(.95,.42,.26), .55 + .25 * st), m); }
+  if (uMaskOn > .5) { vec4 mk = texture2D(uMask, uv); float st = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 16.)); vec3 tint = mix(vec3(.95,.42,.26), vec3(.62,.48,1.), clamp(mk.a / max(mk.r, .001), 0., 1.)); c = mix(c, mix(c * .5, tint, .55 + .25 * st), mk.r); }
   if (uNadirOn > .5) { float r = (lat + 1.5707963) / uNadirA; if (r < 1.) { vec2 e = normalize(d.xy + 1e-6); vec2 q = vec2(.5 + .5 * r * e.x, .5 - .5 * r * e.y); vec4 n = texture2D(uNadir, q); c = mix(c, n.rgb, n.a); } }
   return c;
 }
@@ -791,6 +855,8 @@ function uploadNadir() {
 }
 function openResult(res) {
   view.res = res; show('result');
+  brush.undo = []; $('#bUndo').disabled = true; setBrush(false);
+  $('#brushHint').textContent = 'Закрасьте пальцем место с искажением — двоение, разрыв, человека — и нажмите «Дорисовать».';
   $('#resDims').textContent = `${res.W}×${res.H}`;
   if (!initGL()) { toast('WebGL недоступен — показываю развёртку.'); setFlat(true); }
   else {
@@ -803,7 +869,8 @@ function openResult(res) {
     }
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, view.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, pw, ph, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pv.buffer || pv));
-    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, res.mw, res.mw / 2, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, res.mask);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE_ALPHA, res.mw, res.mw / 2, 0, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, res.mask);
+    view.pvTexW = pw; view.pvTexH = ph;
     uploadNadir();
     setFlat(false);
   }
@@ -863,7 +930,7 @@ function setFlat(on) {
   view.dirty = true;
 }
 $('#tFlat').addEventListener('click', () => setFlat($('#flat').hidden));
-$('#tMask').addEventListener('click', () => { view.showMask = !view.showMask; setPressed($('#tMask'), view.showMask); view.dirty = true; if (view.showMask) toast('Штриховка — места, которые не попали ни в один кадр и залиты по соседям.'); });
+$('#tMask').addEventListener('click', () => { view.showMask = !view.showMask; setPressed($('#tMask'), view.showMask); view.dirty = true; if (view.showMask) toast('Фиолетовая штриховка — дорисовано нейросетью, оранжевая — залито цветом. Кадров там не было.', 4500); });
 $('#tNadir').addEventListener('click', () => { view.showNadir = !view.showNadir; setPressed($('#tNadir'), view.showNadir); $('#nadirRow').hidden = !view.showNadir; if (view.showNadir) { view.lat = -70 * D2R; uploadNadir(); } view.dirty = true; });
 $('#nadirText').addEventListener('input', () => uploadNadir());
 $('#tGyro').addEventListener('click', async () => {
@@ -884,21 +951,146 @@ function renderStats(res) {
   if (s.pairs != null) {
     add('Кадров', `${s.frames} <small style="color:var(--vf-muted)">(${s.linked} связано)</small>`);
     add('Пар / совпадений', `${s.pairs} / ${s.matches}`);
-    add('Ошибка склейки', s.rms != null ? s.rms.toFixed(2) + ' px' : '—');
+    add('Ошибка склейки', s.rms != null ? (s.parallax ? `${s.rmsRot.toFixed(1)} → ${s.rms.toFixed(2)} px` : s.rms.toFixed(2) + ' px') : '—');
+    add('Параллакс', s.parallax ? 'компенсирован' : 'не нужен');
     add('Угол объектива', s.fovLong.toFixed(1) + '°');
     add('Фокус', `${Math.round(s.f)} px <small style="color:var(--vf-muted)">(было ${Math.round(s.f0)})</small>`);
   }
   add('Снято реально', (s.coverage * 100).toFixed(1) + '% сферы');
+  if (s.aiFilled) add('Дорисовал ИИ', (s.aiFilled * 100).toFixed(1) + '% · ' + s.aiTiles + ' тайл.');
+  else if (s.aiError) add('ИИ', 'не загрузился');
   add('Развёртка', `${res.W}×${res.H}`);
   if (s.ms) add('Время', (s.ms / 1000).toFixed(1) + ' с');
   $('#stats').innerHTML = rows.join('');
   let pill, txt;
-  if (s.rms == null) { pill = s.coverage > 0.99 ? 'good' : 'mid'; txt = s.coverage > 0.99 ? '<b>Полная сфера.</b>' : `<b>Потолок и пол залиты по соседним цветам</b> — панорама телефона их не снимает. Закройте надир табличкой или доснимите их.`; }
+  if (s.rms == null) { pill = s.coverage > 0.99 ? 'good' : 'mid'; txt = s.coverage > 0.99 ? '<b>Полная сфера.</b>' : s.aiFilled ? `<b>Края потолка и пола продолжила нейросеть</b>, дальше — плавная заливка: панорама телефона их не снимает. Закройте надир табличкой или снимите сферу по точкам.` : `<b>Потолок и пол залиты по соседним цветам</b> — панорама телефона их не снимает. Закройте надир табличкой или доснимите их.`; }
+  else if (s.rms < 1.2 && s.parallax) { pill = 'good'; txt = `<b>Отличная склейка.</b> Телефон двигался — склейка учла параллакс и глубину сцены${s.aiFilled ? ', пустоты дорисовала нейросеть' : ''}. Если где-то осталось двоение, закрасьте его ИИ-кистью.`; }
   else if (s.rms < 1.2 && s.coverage > 0.97) { pill = 'good'; txt = '<b>Отличная склейка.</b> Швы в пределах пикселя.'; }
+  else if (s.rms < 1.2) { pill = 'good'; txt = `<b>Отличная склейка.</b> ${s.aiFilled ? 'Неснятые места дорисовала нейросеть (штриховка в «Дорисованном»).' : 'Неснятые места залиты по соседям.'}`; }
   else if (s.rms < 2.5) { pill = 'mid'; txt = s.coverage < 0.97 ? `<b>Хорошая склейка</b>, но ${(100 - s.coverage * 100).toFixed(0)}% сферы не снято — эти места залиты.` : '<b>Хорошая склейка.</b> На близких предметах возможны лёгкие сдвиги.'; }
   else { pill = 'poor'; txt = '<b>Заметные расхождения.</b> Скорее всего, телефон смещался. Вращайте его вокруг объектива и держите на месте.'; }
   $('#verdict').innerHTML = `<span class="pill ${pill}">${pill === 'good' ? 'ОТЛИЧНО' : pill === 'mid' ? 'ХОРОШО' : 'ПЕРЕСНЯТЬ'}</span><span>${txt}</span>`;
 }
+
+// ───────────── ИИ-кисть: исправление искажений нейросетью ─────────────
+const brush = { on: false, ctx: null, dpr: 1, painting: false, last: null, undo: [], busy: false };
+let aiWorker = null;
+function aiInpaint(img, mask, S) {
+  return new Promise((resolve, reject) => {
+    if (!aiWorker) aiWorker = new Worker(URL.createObjectURL(new Blob([coreSrc + WORKER_GLUE], { type: 'text/javascript' })));
+    aiWorker.onmessage = e => { const m = e.data; if (m.type === 'done') resolve(m.out); else if (m.type === 'error') reject(new Error(m.message)); };
+    aiWorker.onerror = e => { aiWorker = null; reject(new Error(e.message || 'сбой нейросети')); };
+    aiWorker.postMessage({ type: 'inpaint', base: BASE, img, mask, S }, [img.buffer]);
+  });
+}
+function sizeBrush() {
+  const cv = $('#brushCv'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  brush.ctx = cv.getContext('2d', { willReadFrequently: true }); brush.dpr = dpr;
+}
+function clearBrush() { if (brush.ctx) brush.ctx.clearRect(0, 0, brush.ctx.canvas.width, brush.ctx.canvas.height); }
+function setBrush(on) {
+  brush.on = on; setPressed($('#tBrush'), on); $('#brushBar').hidden = !on; $('#brushCv').hidden = !on;
+  if (on) {
+    if (!$('#flat').hidden) setFlat(false);
+    if (view.gyro) { view.gyro = false; setPressed($('#tGyro'), false); }
+    sizeBrush(); clearBrush();
+    $('#brushCv').style.opacity = '0.55';
+  }
+}
+$('#tBrush').addEventListener('click', () => setBrush(!brush.on));
+$('#bClear').addEventListener('click', clearBrush);
+window.addEventListener('resize', () => { if (brush.on) { sizeBrush(); clearBrush(); } });
+(function brushInput() {
+  const cv = $('#brushCv');
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * brush.dpr, (e.clientY - r.top) * brush.dpr]; };
+  const stroke = (a, b) => { const x = brush.ctx; x.strokeStyle = '#9b7bff'; x.fillStyle = '#9b7bff'; x.lineCap = 'round'; x.lineJoin = 'round'; x.lineWidth = +$('#brushSize').value * brush.dpr; x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.stroke(); };
+  cv.addEventListener('pointerdown', e => { if (brush.busy) return; cv.setPointerCapture(e.pointerId); brush.painting = true; brush.last = pos(e); stroke(brush.last, brush.last); });
+  cv.addEventListener('pointermove', e => { if (!brush.painting) return; const p = pos(e); stroke(brush.last, p); brush.last = p; });
+  const end = () => { brush.painting = false; };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+})();
+// пересчёт полосы превью и маски после правки полной развёртки
+function refreshRows(v0, v1) {
+  const r = view.res, gl = view.gl, W = r.W, H = r.H;
+  const PW = r.pw, PH = r.ph, s = W / PW, py0 = Math.max(0, Math.floor(v0 / s)), py1 = Math.min(PH - 1, Math.ceil((v1 + 1) / s));
+  const pv = r.preview;
+  for (let y = py0; y <= py1; y++) for (let x = 0; x < PW; x++) {
+    let a = 0, b = 0, c = 0, n = 0;
+    const ya = Math.floor(y * s), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * s))), xa = Math.floor(x * s), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * s)));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const d = (yy * W + xx) * 4; a += r.rgba[d]; b += r.rgba[d + 1]; c += r.rgba[d + 2]; n++; }
+    const o = (y * PW + x) * 4; pv[o] = a / n; pv[o + 1] = b / n; pv[o + 2] = c / n; pv[o + 3] = 255;
+  }
+  const MW = r.mw, MH = MW / 2, sm = W / MW, my0 = Math.max(0, Math.floor(v0 / sm)), my1 = Math.min(MH - 1, Math.ceil((v1 + 1) / sm));
+  for (let y = my0; y <= my1; y++) for (let x = 0; x < MW; x++) {
+    let real = 0, ai = 0, n = 0;
+    const ya = Math.floor(y * sm), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * sm))), xa = Math.floor(x * sm), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * sm)));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const v = r.covered[yy * W + xx]; if (v === 1) real++; else if (v >= 2) ai++; n++; }
+    r.mask[(y * MW + x) * 2] = Math.round(255 * (n - real) / n); r.mask[(y * MW + x) * 2 + 1] = Math.round(255 * ai / n);
+  }
+  if (gl && view.pvTexW === PW) {
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, view.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, py0, PW, py1 - py0 + 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pv.buffer, py0 * PW * 4, (py1 - py0 + 1) * PW * 4));
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, my0, MW, my1 - my0 + 1, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, new Uint8Array(r.mask.buffer, my0 * MW * 2, (my1 - my0 + 1) * MW * 2));
+  }
+  view.dirty = true;
+}
+function rowsOf(idx) { let a = Infinity, b = -1; const W = view.res.W; for (const i of idx) { const v = (i / W) | 0; if (v < a) a = v; if (v > b) b = v; } return [a, b]; }
+$('#bApply').addEventListener('click', async () => {
+  const r = view.res; if (!r || brush.busy) return;
+  const cv = $('#brushCv'), w = cv.width, h = cv.height, data = brush.ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (data[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) { toast('Сначала закрасьте место, которое нужно исправить.'); return; }
+  const R = Core.c2wLookAt(view.lon, view.lat), th = Math.tan(view.fov * D2R / 2);
+  const toDir = (px, py) => { const vx = (px - w / 2) / (h / 2) * th, vy = (py - h / 2) / (h / 2) * th, n = Math.hypot(vx, vy, 1); return [(R[0] * vx + R[1] * vy + R[2]) / n, (R[3] * vx + R[4] * vy + R[5]) / n, (R[6] * vx + R[7] * vy + R[8]) / n]; };
+  const cd = toDir((x0 + x1) / 2, (y0 + y1) / 2);
+  let ang = 0; for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [x0, (y0 + y1) / 2], [x1, (y0 + y1) / 2], [(x0 + x1) / 2, y0], [(x0 + x1) / 2, y1]]) { const d = toDir(px, py); ang = Math.max(ang, Math.acos(Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2]))); }
+  const S = 768, native = S / (r.W / (2 * Math.PI));
+  const fov = Math.max(12 * D2R, Math.min(110 * D2R, Math.max(2.6 * ang + 0.06, native)));
+  const ll = Core.lonLatFromDir(cd), Ct = Core.c2wLookAt(ll[0], ll[1]);
+  const img = Core.renderPerspective(r.rgba, r.W, r.H, Ct, fov, S);
+  // маска из мазков: каждый пиксель тайла проецируем на экран просмотра
+  const hole = new Uint8Array(S * S), tt = Math.tan(fov / 2), cc = (S - 1) / 2; let nh = 0;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const vx = (x - cc) / cc * tt, vy = (y - cc) / cc * tt, n = Math.hypot(vx, vy, 1);
+    const d0 = (Ct[0] * vx + Ct[1] * vy + Ct[2]) / n, d1 = (Ct[3] * vx + Ct[4] * vy + Ct[5]) / n, d2 = (Ct[6] * vx + Ct[7] * vy + Ct[8]) / n;
+    const c0 = R[0] * d0 + R[3] * d1 + R[6] * d2, c1 = R[1] * d0 + R[4] * d1 + R[7] * d2, c2 = R[2] * d0 + R[5] * d1 + R[8] * d2;
+    if (c2 <= 0.01) continue;
+    const sx = Math.round(w / 2 + c0 / c2 / th * (h / 2)), sy = Math.round(h / 2 + c1 / c2 / th * (h / 2));
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+    if (data[(sy * w + sx) * 4 + 3] > 40) { hole[y * S + x] = 1; nh++; }
+  }
+  if (nh < 20) { toast('Мазок слишком маленький — закрасьте чуть шире.'); return; }
+  // маска для модели (с запасом 3 px) и мягкая альфа для вклейки
+  const mask = new Uint8Array(S * S).fill(255), alpha = new Float32Array(S * S), D = 3;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (hole[y * S + x]) for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) mask[yy * S + xx] = 0; }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (mask[y * S + x]) continue;
+    let k = 0, n = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; n++; } }
+    alpha[y * S + x] = Math.min(1, 1.6 * k / n);
+  }
+  brush.busy = true; $('#aiBusy').hidden = false; $('#aiBusyTxt').textContent = aiWorker ? 'Нейросеть дорисовывает…' : 'Загружаю нейросеть (≈40 МБ, один раз)…';
+  try {
+    const t0 = performance.now();
+    const out = await aiInpaint(img, mask, S);
+    const undo = Core.applyInpaintTile(r.rgba, r.covered, r.W, r.H, Ct, fov, S, out, alpha);
+    brush.undo.push(undo); $('#bUndo').disabled = false;
+    const [a, b] = rowsOf(undo.idx); if (b >= 0) refreshRows(a, b);
+    clearBrush();
+    $('#brushHint').textContent = `Готово за ${((performance.now() - t0) / 1000).toFixed(1)} с. Можно закрасить следующее место или отменить.`;
+  } catch (e) { toast('Нейросеть не сработала: ' + e.message, 5000); }
+  finally { brush.busy = false; $('#aiBusy').hidden = true; }
+});
+$('#bUndo').addEventListener('click', () => {
+  const r = view.res, u = brush.undo.pop(); if (!r || !u) return;
+  for (let k = 0; k < u.idx.length; k++) { const o = u.idx[k] * 4; r.rgba[o] = u.px[k * 3]; r.rgba[o + 1] = u.px[k * 3 + 1]; r.rgba[o + 2] = u.px[k * 3 + 2]; r.covered[u.idx[k]] = u.cov[k]; }
+  const [a, b] = rowsOf(u.idx); if (b >= 0) refreshRows(a, b);
+  $('#bUndo').disabled = !brush.undo.length;
+});
 
 // ───────────── экспорт JPEG с GPano ─────────────
 function xmpGPano(W, H) {

@@ -143,6 +143,14 @@ footer.note { text-align: left; }
 .pill.good { background: rgba(63,191,134,.18); color: #8de8bd; }
 .pill.mid { background: rgba(242,181,68,.18); color: #f5cd7d; }
 .pill.poor { background: rgba(217,87,63,.2); color: #f39a88; }
+.brush-bar { display: grid; gap: 8px; }
+.brush-hint { margin: 0; font-size: 14px; color: var(--vf-muted); }
+.brush-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.brush-ctrl input[type=range] { flex: 1; min-width: 90px; accent-color: #9b7bff; }
+.brush-ctrl label { font-size: 12px; color: var(--vf-muted); }
+#brushCv { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.ai-busy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(14,18,24,.82); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-weight: 600; font-size: 14px; }
+.ai-busy .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #9b7bff; border-right-color: transparent; animation: spin .8s linear infinite; }
 .nadir-row { display: flex; gap: 8px; align-items: center; }
 .nadir-row input[type=text] { flex: 1; min-width: 0; min-height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: #0f141a; color: var(--vf-ink); padding: 0 12px; font: inherit; font-size: 15px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); transform: translateX(-50%); background: #1d252e; color: #eef1f4; border: 1px solid rgba(255,255,255,.14); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; }
@@ -188,7 +196,7 @@ footer.note { text-align: left; }
         <button id="btnDemo" class="btn">Демо-зал</button>
       </div>
       <input id="panoFile" type="file" accept="image/*" hidden>
-      <p class="note">«Панорама из галереи» превращает обычный снимок в режиме «Панорама» в сферу: полосу ставит на место, потолок и пол заливает. «Демо-зал» показывает всю склейку на имитации съёмки — подходит для компьютера.</p>
+      <p class="note">«Панорама из галереи» превращает обычный снимок в режиме «Панорама» в сферу: полосу ставит на место, края потолка и пола продолжает нейросетью. «Демо-зал» показывает всю склейку на имитации съёмки с рук — подходит для компьютера.</p>
     </div>
 
     <div class="sect">
@@ -225,12 +233,13 @@ footer.note { text-align: left; }
           </div>
           <span class="note">«Авто» подбирает ширину по фокусному расстоянию камеры, чтобы не растягивать пиксели.</span>
         </div>
+        <label class="check"><input type="checkbox" id="optAI" checked><span>ИИ-дорисовка пустот<small>Нейросеть MI-GAN работает прямо в телефоне. При первом запуске скачивается около 40 МБ, потом берётся из кэша.</small></span></label>
         <label class="check"><input type="checkbox" id="optLock" checked><span>Фиксировать экспозицию и баланс белого<small>Если камера разрешает. Иначе яркость выровняется при склейке.</small></span></label>
         <label class="check"><input type="checkbox" id="optVibe" checked><span>Вибрация при снимке<small>Только Android.</small></span></label>
       </div>
     </div>
 
-    <footer class="note">Склейка идёт прямо в браузере, фотографии никуда не отправляются. Порядок: опорные точки → совмещение с поправкой дрейфа гироскопа → связка всех кадров с подбором фокуса → выравнивание экспозиции → двухполосное смешивание → equirectangular 2:1 с метаданными GPano.</footer>
+    <footer class="note">Склейка и нейросеть работают прямо в браузере, фотографии никуда не отправляются. Порядок: опорные точки → совмещение с поправкой дрейфа гироскопа → связка кадров с подбором фокуса → если телефон двигался, связка с параллаксом и глубина сцены → выравнивание экспозиции → швы в обход предметов (graph cut) → двухполосное смешивание → ИИ-дорисовка пустот → equirectangular 2:1 с метаданными GPano.</footer>
   </div>
 </section>
 
@@ -285,6 +294,8 @@ footer.note { text-align: left; }
   <div id="viewer-wrap">
     <canvas id="viewer" aria-label="Просмотр панорамы 360°: перетаскивайте, чтобы осмотреться"></canvas>
     <canvas id="flat" hidden></canvas>
+    <canvas id="brushCv" hidden></canvas>
+    <div class="ai-busy" id="aiBusy" hidden><span class="spin"></span><span id="aiBusyTxt">Нейросеть дорисовывает…</span></div>
     <div class="vtop">
       <button class="icon-btn" id="resHome" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button>
       <span class="spacer"></span>
@@ -297,9 +308,19 @@ footer.note { text-align: left; }
       <button class="tool" id="tShare" hidden>Поделиться</button>
       <button class="tool" id="tGyro" aria-pressed="false">Гироскоп</button>
       <button class="tool" id="tFlat" aria-pressed="false">Развёртка</button>
+      <button class="tool" id="tBrush" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-9 9H5v-6z"/><path d="M12 6l6 6"/></svg>ИИ-кисть</button>
       <button class="tool" id="tMask" aria-pressed="false">Дорисованное</button>
       <button class="tool" id="tNadir" aria-pressed="false">Табличка на полу</button>
       <button class="tool" id="tAgain">Снять заново</button>
+    </div>
+    <div class="brush-bar" id="brushBar" hidden>
+      <p class="brush-hint" id="brushHint">Закрасьте пальцем место с искажением — двоение, разрыв, человека — и нажмите «Дорисовать».</p>
+      <div class="brush-ctrl">
+        <label for="brushSize" class="mono">кисть</label><input type="range" id="brushSize" min="10" max="70" value="28">
+        <button class="tool" id="bClear">Стереть</button>
+        <button class="tool" id="bUndo" disabled>Отменить</button>
+        <button class="tool main" id="bApply">Дорисовать</button>
+      </div>
     </div>
     <div class="nadir-row" id="nadirRow" hidden>
       <input type="text" id="nadirText" maxlength="40" value="Музей · виртуальный тур" aria-label="Текст таблички на надире">
@@ -677,7 +698,9 @@ function matchPair(ci, cj, f, mode, rand) {
   // RANSAC по модели чистого вращения
   const A = res.map(m => camRay(ci, f, m.xi, m.yi)), Bv = res.map(m => camRay(cj, f, m.xj, m.yj));
   const thr = (mode === 'coarse' ? 4.5 : 2.2) / f;
-  const rr = ransacRotation(A, Bv, thr, 250, rand);
+  let rr = ransacRotation(A, Bv, thr, 250, rand);
+  // параллакс (съёмка с рук): единый поворот объясняет не все точки — расширяем порог, остальное решит связка
+  if (mode !== 'coarse' && (!rr || rr.inliers.length < 0.55 * res.length)) { const r2 = ransacRotation(A, Bv, 8 / f, 250, rand); if (r2 && (!rr || r2.inliers.length > rr.inliers.length * 1.25)) rr = r2; }
   if (!rr || rr.inliers.length < 10 || rr.inliers.length < 0.3 * res.length) return { matches: [], shiftOK: true };
   // согласие с гироскопом: относительный поворот не должен уходить далеко от приора
   const Rprior = m3mul(m3T(cj.C2Wprior), ci.C2Wprior);
@@ -782,6 +805,225 @@ function rayW(R, x, y, f) { const u = rayU(x, y, f).u; return mv(R, u); }
 function mv(R, v) { return [R[0] * v[0] + R[1] * v[1] + R[2] * v[2], R[3] * v[0] + R[4] * v[1] + R[5] * v[2], R[6] * v[0] + R[7] * v[1] + R[8] * v[2]]; }
 function skew(w, s) { return Float64Array.of(0, -s * w[2], s * w[1], s * w[2], 0, -s * w[0], -s * w[1], s * w[0], 0); }
 
+// ───────────────────────── связка с параллаксом ─────────────────────────
+// Телефон в руках движется по дуге вокруг тела: центр кадра c_i = (Fx, Fy, γ·Fz) + δc_i (в единицах «длины руки»),
+// где F — направление съёмки. Для каждой пары совпадений неизвестна обратная глубина q = exp(s) (исключается дополнением Шура).
+// Невязка: направление на точку из камеры j против наблюдаемого луча w_j, в пикселях.
+function bundleAdjustParallax(cams, M, f0, iters, report) {
+  const N = cams.length, nR = 3 * (N - 1), oC = nR, iPhi = oC + 3 * N, iGam = iPhi + 1, P = iGam + 1;
+  const rIdx = c => (c === 0 ? -1 : 3 * (c - 1)), cIdx = c => oC + 3 * c;
+  const sigR = 0.35, sigC = 0.25, sigF = 0.25, sigG = 0.6, sigS = 3, s0 = Math.log(0.15), HUB = 2;
+  let C2W = cams.map(c => m3copy(c.C2W)), dC = cams.map(() => [0, 0, 0]), phi = 0, gam = 0.5;
+  const s = new Float64Array(M.n);
+  const center = (R, d, g) => [R[2] + d[0], R[5] + d[1], g * R[8] + d[2]];
+  // начальные глубины: одномерная триангуляция
+  {
+    const f = f0;
+    for (let k = 0; k < M.n; k++) {
+      const i = M.i[k], j = M.j[k];
+      const wi = rayW(C2W[i], M.xi[k], M.yi[k], f), wj = rayW(C2W[j], M.xj[k], M.yj[k], f);
+      const ci = center(C2W[i], dC[i], gam), cj = center(C2W[j], dC[j], gam), d = [ci[0] - cj[0], ci[1] - cj[1], ci[2] - cj[2]];
+      const a = cross(wi, wj), b = cross(d, wj), bb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+      let q = bb > 1e-12 ? -(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / bb : 0.15;
+      q = Math.max(0.01, Math.min(3, q));
+      s[k] = Math.log(q);
+    }
+  }
+  const resid = (Rs, Ds, ph, g, sv, k, out) => {
+    const f = f0 * Math.exp(ph), i = M.i[k], j = M.j[k];
+    const wi = rayW(Rs[i], M.xi[k], M.yi[k], f), wj = rayW(Rs[j], M.xj[k], M.yj[k], f);
+    const ci = center(Rs[i], Ds[i], g), cj = center(Rs[j], Ds[j], g), q = Math.exp(sv[k]);
+    const v = [wi[0] + q * (ci[0] - cj[0]), wi[1] + q * (ci[1] - cj[1]), wi[2] + q * (ci[2] - cj[2])], n = Math.hypot(v[0], v[1], v[2]);
+    out[0] = (v[0] / n - wj[0]) * f0; out[1] = (v[1] / n - wj[1]) * f0; out[2] = (v[2] / n - wj[2]) * f0;
+  };
+  const r3 = [0, 0, 0];
+  const cost = (Rs, Ds, ph, g, sv) => {
+    let E = 0;
+    for (let k = 0; k < M.n; k++) { resid(Rs, Ds, ph, g, sv, k, r3); const e = Math.hypot(r3[0], r3[1], r3[2]); E += e <= HUB ? e * e : 2 * HUB * e - HUB * HUB; E += (sv[k] - s0) * (sv[k] - s0) / (sigS * sigS); }
+    for (let c = 1; c < N; c++) { const l = logSO3(m3mul(Rs[c], m3T(cams[c].C2Wprior))); E += (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) / (sigR * sigR); }
+    for (let c = 0; c < N; c++) E += (Ds[c][0] ** 2 + Ds[c][1] ** 2 + Ds[c][2] ** 2) / (sigC * sigC);
+    return E + ph * ph / (sigF * sigF) + (g - 0.5) * (g - 0.5) / (sigG * sigG);
+  };
+  let E = cost(C2W, dC, phi, gam, s), lambda = 1e-3;
+  const idx = new Int32Array(14), J = new Float64Array(3 * 14);
+  for (let it = 0; it < iters; it++) {
+    const A = new Float64Array(P * P), b = new Float64Array(P);
+    const aqq = new Float64Array(M.n), bq = new Float64Array(M.n), Axq = [];
+    const f = f0 * Math.exp(phi);
+    for (let k = 0; k < M.n; k++) {
+      const i = M.i[k], j = M.j[k], Ri = C2W[i], Rj = C2W[j];
+      const ui = rayU(M.xi[k], M.yi[k], f), uj = rayU(M.xj[k], M.yj[k], f);
+      const wi = mv(Ri, ui.u), wj = mv(Rj, uj.u);
+      const Fi = [Ri[2], Ri[5], Ri[8]], Fj = [Rj[2], Rj[5], Rj[8]];
+      const ci = center(Ri, dC[i], gam), cj = center(Rj, dC[j], gam), q = Math.exp(s[k]);
+      const dcv = [ci[0] - cj[0], ci[1] - cj[1], ci[2] - cj[2]];
+      const v = [wi[0] + q * dcv[0], wi[1] + q * dcv[1], wi[2] + q * dcv[2]], nv = Math.hypot(v[0], v[1], v[2]), vh = [v[0] / nv, v[1] / nv, v[2] / nv];
+      const r = [(vh[0] - wj[0]) * f0, (vh[1] - wj[1]) * f0, (vh[2] - wj[2]) * f0];
+      const e = Math.hypot(r[0], r[1], r[2]), wt = e <= HUB ? 1 : HUB / e;
+      // Pv = (I - vh vhᵀ)/|v| · f0
+      const Pv = new Float64Array(9); for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) Pv[a * 3 + c] = ((a === c ? 1 : 0) - vh[a] * vh[c]) / nv * f0;
+      const mulP = (x) => [Pv[0] * x[0] + Pv[1] * x[1] + Pv[2] * x[2], Pv[3] * x[0] + Pv[4] * x[1] + Pv[5] * x[2], Pv[6] * x[0] + Pv[7] * x[1] + Pv[8] * x[2]];
+      let nc = 0; J.fill(0);
+      const col = (pi, vec) => { idx[nc] = pi; J[nc] = vec[0]; J[14 + nc] = vec[1]; J[28 + nc] = vec[2]; nc++; };
+      // вращение i: dv = -[wi]x δ + q Γ(-[Fi]x) δ  → столбцы для δ = e_a
+      for (let a = 0; a < 3; a++) {
+        const ea = [0, 0, 0]; ea[a] = 1;
+        if (i !== 0) { const t1 = cross(ea, wi), t2 = cross(ea, Fi); col(rIdx(i) + a, mulP([t1[0] + q * t2[0], t1[1] + q * t2[1], t1[2] + q * gam * t2[2]])); }
+        if (j !== 0) { const t2 = cross(ea, Fj), t3 = cross(ea, wj); const pv = mulP([-q * t2[0], -q * t2[1], -q * gam * t2[2]]); col(rIdx(j) + a, [pv[0] - t3[0] * f0, pv[1] - t3[1] * f0, pv[2] - t3[2] * f0]); }
+      }
+      for (let a = 0; a < 3; a++) { const ea = [0, 0, 0]; ea[a] = q; col(cIdx(i) + a, mulP(ea)); const eb = [0, 0, 0]; eb[a] = -q; col(cIdx(j) + a, mulP(eb)); }
+      { const dwi = mv(Ri, ui.du), dwj = mv(Rj, uj.du); const pv = mulP(dwi); col(iPhi, [pv[0] - dwj[0] * f0, pv[1] - dwj[1] * f0, pv[2] - dwj[2] * f0]); }
+      col(iGam, mulP([0, 0, q * (Fi[2] - Fj[2])]));
+      const Jq = mulP([q * dcv[0], q * dcv[1], q * dcv[2]]);
+      // накопление
+      for (let a = 0; a < nc; a++) {
+        const ja0 = J[a], ja1 = J[14 + a], ja2 = J[28 + a], pa = idx[a];
+        b[pa] += wt * (ja0 * r[0] + ja1 * r[1] + ja2 * r[2]);
+        for (let c = 0; c < nc; c++) A[pa * P + idx[c]] += wt * (ja0 * J[c] + ja1 * J[14 + c] + ja2 * J[28 + c]);
+      }
+      aqq[k] = wt * (Jq[0] * Jq[0] + Jq[1] * Jq[1] + Jq[2] * Jq[2]) + 1 / (sigS * sigS);
+      bq[k] = wt * (Jq[0] * r[0] + Jq[1] * r[1] + Jq[2] * r[2]) + (s[k] - s0) / (sigS * sigS);
+      const ax = new Float64Array(nc); for (let a = 0; a < nc; a++) ax[a] = wt * (J[a] * Jq[0] + J[14 + a] * Jq[1] + J[28 + a] * Jq[2]);
+      Axq.push([Int32Array.from(idx.subarray(0, nc)), ax]);
+    }
+    for (let c = 1; c < N; c++) { const l = logSO3(m3mul(C2W[c], m3T(cams[c].C2Wprior))), p = rIdx(c); for (let a = 0; a < 3; a++) { A[(p + a) * P + p + a] += 1 / (sigR * sigR); b[p + a] += l[a] / (sigR * sigR); } }
+    for (let c = 0; c < N; c++) { const p = cIdx(c); for (let a = 0; a < 3; a++) { A[(p + a) * P + p + a] += 1 / (sigC * sigC); b[p + a] += dC[c][a] / (sigC * sigC); } }
+    A[iPhi * P + iPhi] += 1 / (sigF * sigF); b[iPhi] += phi / (sigF * sigF);
+    A[iGam * P + iGam] += 1 / (sigG * sigG); b[iGam] += (gam - 0.5) / (sigG * sigG);
+    let improved = false;
+    for (let tries = 0; tries < 8 && !improved; tries++) {
+      const Ad = Float64Array.from(A), bd = Float64Array.from(b);
+      for (let qd = 0; qd < P; qd++) Ad[qd * P + qd] += lambda * A[qd * P + qd] + 1e-9;
+      const aqqD = new Float64Array(M.n);
+      for (let k = 0; k < M.n; k++) {
+        const a = aqq[k] * (1 + lambda) + 1e-12; aqqD[k] = a;
+        const [ix, ax] = Axq[k], n = ix.length;
+        for (let u = 0; u < n; u++) { const fu = ax[u] / a; bd[ix[u]] -= fu * bq[k]; for (let w = 0; w < n; w++) Ad[ix[u] * P + ix[w]] -= fu * ax[w]; }
+      }
+      const dx = cholSolve(Ad, bd.map(v => -v), P); if (!dx) { lambda *= 10; continue; }
+      const sN = new Float64Array(M.n);
+      for (let k = 0; k < M.n; k++) { const [ix, ax] = Axq[k]; let t = bq[k]; for (let u = 0; u < ix.length; u++) t += ax[u] * dx[ix[u]]; sN[k] = s[k] + Math.max(-2, Math.min(2, -t / aqqD[k])); }
+      const RN = C2W.map((R, c) => { if (c === 0) return R; const p = rIdx(c); return m3mul(expSO3(dx[p], dx[p + 1], dx[p + 2]), R); });
+      const DN = dC.map((d, c) => { const p = cIdx(c); return [d[0] + dx[p], d[1] + dx[p + 1], d[2] + dx[p + 2]]; });
+      const phN = phi + dx[iPhi], gN = gam + dx[iGam];
+      const En = cost(RN, DN, phN, gN, sN);
+      if (En < E) { const rel = (E - En) / E; C2W = RN; dC = DN; phi = phN; gam = gN; s.set(sN); E = En; lambda = Math.max(1e-7, lambda / 3); improved = true; if (rel < 1e-6) it = iters; }
+      else lambda *= 4;
+    }
+    if (report) report(it / iters);
+    if (!improved) break;
+  }
+  const per = new Float64Array(M.n); let s2 = 0;
+  for (let k = 0; k < M.n; k++) { resid(C2W, dC, phi, gam, s, k, r3); const e = Math.hypot(r3[0], r3[1], r3[2]); per[k] = e; s2 += e * e; }
+  const centers = C2W.map((R, c) => center(R, dC[c], gam));
+  return { C2W, centers, f: f0 * Math.exp(phi), gamma: gam, s, rms: M.n ? Math.sqrt(s2 / M.n) : 0, per };
+}
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+
+// Плотная глубина: для угловых точек кадра i ищем пару в кадре j вдоль эпиполярной линии
+// (перебор обратной глубины q при известных позах и центрах). Возвращает точки сцены.
+function epipolarPoints(cams, f, pairs, report) {
+  const pts = [], o = [0, 0];
+  const L = 1, tpl = 6;
+  pairs.forEach((pr, pk) => {
+    const ci = cams[pr.i], cj = cams[pr.j]; if (!ci.pyr || !cj.pyr) return;
+    const Ii = ci.pyr.levels[L], Ij = cj.pyr.levels[L], Ii0 = ci.pyr.levels[0], Ij0 = cj.pyr.levels[0];
+    const kI = ci.pyr.k * 2, kJ = cj.pyr.k * 2, k0I = ci.pyr.k, k0J = cj.pyr.k;
+    const H = pairHomography(ci, cj, f), W2Cj = m3T(cj.C2W);
+    const dc = [ci.center[0] - cj.center[0], ci.center[1] - cj.center[1], ci.center[2] - cj.center[2]];
+    const proj = (v) => { const z = W2Cj[6] * v[0] + W2Cj[7] * v[1] + W2Cj[8] * v[2]; if (z <= 1e-6) return null; return [f * (W2Cj[0] * v[0] + W2Cj[1] * v[1] + W2Cj[2] * v[2]) / z + cj.cx, f * (W2Cj[3] * v[0] + W2Cj[4] * v[1] + W2Cj[5] * v[2]) / z + cj.cy]; };
+    let used = 0;
+    for (const c of ci.corners) {
+      if (used > 260) break;
+      hApply(H, c[0], c[1], o); if (o[0] !== o[0]) continue;
+      const m = 20; if (o[0] < -200 || o[1] < -200 || o[0] > cj.w + 200 || o[1] > cj.h + 200) continue;
+      const w = rayW(ci.C2W, c[0] - ci.cx, c[1] - ci.cy, f);
+      // кривая кандидатов: q от 0 (бесконечность) до qMax
+      const cand = []; let last = null;
+      for (let qq = 0; qq <= 0.9; qq += 0.004) {
+        const p = proj([w[0] + qq * dc[0], w[1] + qq * dc[1], w[2] + qq * dc[2]]); if (!p) break;
+        if (p[0] < m || p[1] < m || p[0] > cj.w - m || p[1] > cj.h - m) { if (cand.length) break; else continue; }
+        if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.9 * kJ) continue;
+        cand.push([p[0], p[1], qq]); last = p;
+      }
+      if (cand.length < 3) continue;
+      used++;
+      const xi = (c[0] + 0.5) / kI - 0.5, yi = (c[1] + 0.5) / kI - 0.5;
+      const T = makeTemplate(Ii, xi, yi, tpl); if (!T) continue;
+      // образец из j: патч, повёрнутый по гомографии поворота, сдвинутый в точку кандидата
+      const n = 2 * tpl + 1, N = n * n, S = new Float32Array(N);
+      let best = -2, bi = -1, second = -2; const sc = new Float32Array(cand.length);
+      // локальные смещения гомографии вокруг точки i (в пикселях j полного разрешения)
+      const off = new Float32Array(N * 2);
+      for (let v = -tpl, q = 0; v <= tpl; v++) for (let u = -tpl; u <= tpl; u++, q++) { hApply(H, c[0] + u * kI, c[1] + v * kI, o); off[q * 2] = o[0]; off[q * 2 + 1] = o[1]; }
+      const hc = [0, 0]; hApply(H, c[0], c[1], hc);
+      for (let k = 0; k < cand.length; k++) {
+        const dx = cand[k][0] - hc[0], dy = cand[k][1] - hc[1];
+        let s = 0, ss = 0, dot = 0, ok = true;
+        for (let q = 0; q < N; q++) {
+          const val = sampleF(Ij, (off[q * 2] + dx + 0.5) / kJ - 0.5, (off[q * 2 + 1] + dy + 0.5) / kJ - 0.5);
+          if (val !== val) { ok = false; break; } S[q] = val; s += val; ss += val * val; dot += T[q] * val;
+        }
+        const vv = ss - s * s / N; const r = ok && vv > 1e-7 ? dot / Math.sqrt(vv) : -2; sc[k] = r;
+        if (r > best) { best = r; bi = k; }
+      }
+      if (bi < 0 || best < 0.82) continue;
+      for (let k = 0; k < cand.length; k++) if (Math.abs(k - bi) > 3 && sc[k] > second) second = sc[k];
+      if (second > best - 0.04) continue; // неоднозначно (повтор текстуры)
+      // уточнение глубины параболой
+      let qb = cand[bi][2];
+      if (bi > 0 && bi < cand.length - 1) { const a = sc[bi - 1], b2 = sc[bi + 1], den = a - 2 * best + b2; if (den < -1e-6) { const t = Math.max(-0.5, Math.min(0.5, 0.5 * (a - b2) / den)); qb += t * (t > 0 ? cand[bi + 1][2] - qb : qb - cand[bi - 1][2]); } }
+      if (qb < 1e-3) { pts.push([w[0] * 1e3, w[1] * 1e3, w[2] * 1e3, 0.5]); continue; }
+      pts.push([ci.center[0] + w[0] / qb, ci.center[1] + w[1] / qb, ci.center[2] + w[2] / qb, best]);
+    }
+    if (report) report((pk + 1) / pairs.length);
+  });
+  return pts;
+}
+
+// Поле обратной глубины на сфере (сетка GW×GH по долготе/широте) из облака точек; пустоты — гладкая интерполяция.
+function buildDepthField(points, GW, GH, smooth) {
+  const sum = new Float64Array(GW * GH), cnt = new Float64Array(GW * GH);
+  const all = [], cellVals = new Map();
+  for (const p of points) {
+    const n = Math.hypot(p[0], p[1], p[2]); if (!(n > 1e-6)) continue;
+    const iD = 1 / n, lon = Math.atan2(p[0], p[1]), lat = Math.asin(p[2] / n);
+    const x = Math.min(GW - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * GW))), y = Math.min(GH - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * GH)));
+    sum[y * GW + x] += iD; cnt[y * GW + x] += 1; all.push(iD);
+    const key = y * GW + x; if (!cellVals.has(key)) cellVals.set(key, []); cellVals.get(key).push(iD);
+  }
+  all.sort((a, b) => a - b);
+  const med = all.length ? all[all.length >> 1] : 0;
+  const data = new Float64Array(GW * GH), wd = new Float64Array(GW * GH);
+  // медиана в ячейке (устойчиво к выбросам), вес — по числу точек
+  for (const [k, arr] of cellVals) { arr.sort((a, b) => a - b); data[k] = arr[arr.length >> 1]; wd[k] = Math.min(6, arr.length) * 2; }
+  let D = new Float64Array(GW * GH).fill(med), D2 = new Float64Array(GW * GH);
+  // грубое приближение (вдвое меньшая сетка) — чтобы пустоты заполнялись быстро
+  if (GW >= 48 && points.length) {
+    const sub = buildDepthField(points, GW / 2, GH / 2, smooth);
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) D[y * GW + x] = depthAt(sub, (x + 0.5) / GW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / GH * Math.PI);
+  }
+  for (let k = 0; k < GW * GH; k++) if (cnt[k] > 0) D[k] = data[k];
+  const lam = smooth != null ? smooth : 0.6;
+  for (let it = 0; it < 150; it++) {
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const k = y * GW + x, l = y * GW + (x + GW - 1) % GW, r = y * GW + (x + 1) % GW, u = y > 0 ? k - GW : k, d = y < GH - 1 ? k + GW : k;
+      const nb = (D[l] + D[r] + D[u] + D[d]) * lam;
+      D2[k] = (nb + wd[k] * data[k] + (wd[k] ? 0 : 0.002 * med)) / (4 * lam + wd[k] + (wd[k] ? 0 : 0.002));
+    }
+    const t = D; D = D2; D2 = t;
+  }
+  return { GW, GH, iD: Float32Array.from(D), median: med };
+}
+function depthAt(field, lon, lat) {
+  const GW = field.GW, GH = field.GH;
+  let x = (lon / (2 * Math.PI) + 0.5) * GW - 0.5, y = (0.5 - lat / Math.PI) * GH - 0.5;
+  if (y < 0) y = 0; if (y > GH - 1) y = GH - 1;
+  const x0 = Math.floor(x), y0 = Math.min(GH - 2, Math.floor(y)), fx = x - x0, fy = y - y0;
+  const xa = ((x0 % GW) + GW) % GW, xb = (xa + 1) % GW, D = field.iD;
+  return (D[y0 * GW + xa] * (1 - fx) + D[y0 * GW + xb] * fx) * (1 - fy) + (D[(y0 + 1) * GW + xa] * (1 - fx) + D[(y0 + 1) * GW + xb] * fx) * fy;
+}
+
 // ───────────────────────── выравнивание яркости ─────────────────────────
 function patchMeanLin(cam, x, y, out) {
   const r = Math.max(2, Math.round(Math.max(cam.w, cam.h) / 400));
@@ -818,6 +1060,170 @@ function solveGains(cams, pairs) {
   return gains;
 }
 
+// ───────────────────────── швы в обход объектов (graph cut, α-расширение) ─────────────────────────
+// Максимальный поток (Диниц) на небольших графах.
+function MaxFlow(n, mEst) {
+  this.n = n; this.head = new Int32Array(n).fill(-1);
+  this.to = new Int32Array(mEst * 2); this.nxt = new Int32Array(mEst * 2); this.cap = new Float64Array(mEst * 2); this.m = 0;
+}
+MaxFlow.prototype.edge = function (u, v, c, rc) {
+  if (this.m + 2 > this.to.length) { const g = (a, T) => { const b = new T(a.length * 2); b.set(a); return b; }; this.to = g(this.to, Int32Array); this.nxt = g(this.nxt, Int32Array); this.cap = g(this.cap, Float64Array); }
+  const m = this.m;
+  this.to[m] = v; this.cap[m] = c; this.nxt[m] = this.head[u]; this.head[u] = m;
+  this.to[m + 1] = u; this.cap[m + 1] = rc || 0; this.nxt[m + 1] = this.head[v]; this.head[v] = m + 1;
+  this.m += 2;
+};
+MaxFlow.prototype.run = function (s, t) {
+  const n = this.n, level = new Int32Array(n), it = new Int32Array(n), queue = new Int32Array(n), stack = new Int32Array(n), path = new Int32Array(n);
+  const { to, nxt, cap, head } = this; let flow = 0;
+  for (;;) {
+    level.fill(-1); level[s] = 0; let qh = 0, qt = 0; queue[qt++] = s;
+    while (qh < qt) { const u = queue[qh++]; for (let e = head[u]; e >= 0; e = nxt[e]) if (cap[e] > 1e-12 && level[to[e]] < 0) { level[to[e]] = level[u] + 1; queue[qt++] = to[e]; } }
+    if (level[t] < 0) break;
+    for (let i = 0; i < n; i++) it[i] = head[i];
+    // итеративный поиск блокирующего потока
+    for (;;) {
+      let sp = 0, u = s; stack[0] = s;
+      while (u !== t) {
+        let e = it[u];
+        while (e >= 0 && !(cap[e] > 1e-12 && level[to[e]] === level[u] + 1)) e = nxt[e];
+        it[u] = e;
+        if (e < 0) { if (sp === 0) { u = -1; break; } level[u] = -1; sp--; u = stack[sp]; it[u] = nxt[it[u]]; continue; }
+        path[sp] = e; stack[++sp] = to[e]; u = to[e];
+      }
+      if (u < 0) break;
+      let push = Infinity; for (let k = 0; k < sp; k++) push = Math.min(push, cap[path[k]]);
+      for (let k = 0; k < sp; k++) { cap[path[k]] -= push; cap[path[k] ^ 1] += push; }
+      flow += push;
+    }
+  }
+  // множество вершин, достижимых из источника в остаточной сети
+  const seen = new Uint8Array(n); let qh = 0, qt = 0; queue[qt++] = s; seen[s] = 1;
+  while (qh < qt) { const u = queue[qh++]; for (let e = head[u]; e >= 0; e = nxt[e]) if (cap[e] > 1e-12 && !seen[to[e]]) { seen[to[e]] = 1; queue[qt++] = to[e]; } }
+  return { flow, sourceSide: seen };
+};
+
+// Для каждой ячейки сетки LW×LH: какие кадры её видят и какого она цвета в каждом.
+// Энергия: данные = предпочтение центра кадра + отклонение от медианы кандидатов (убирает прохожих),
+//          шов   = разница цветов двух кадров по обе стороны шва (шов идёт там, где кадры совпадают).
+function seamLabels(cams, f, gains, depth, LW, report) {
+  const LH = LW / 2, NC = LW * LH, K = 6, NI = cams.length;
+  const candI = new Int16Array(NC * K).fill(-1), candC = new Float32Array(NC * K * 3), candW = new Float32Array(NC * K), nc = new Uint8Array(NC);
+  // уменьшенные (×4) копии кадров в sRGB для сравнения цветов
+  for (let ci = 0; ci < NI; ci++) {
+    const cam = cams[ci], D = 4, sw = Math.floor(cam.w / D), sh = Math.floor(cam.h / D), sm = new Float32Array(sw * sh * 3), g = gains[ci];
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      let r = 0, gg = 0, b = 0;
+      for (let yy = 0; yy < D; yy++) for (let xx = 0; xx < D; xx++) { const p = ((y * D + yy) * cam.w + x * D + xx) * 3; r += SRGB2LIN[cam.rgb[p]]; gg += SRGB2LIN[cam.rgb[p + 1]]; b += SRGB2LIN[cam.rgb[p + 2]]; }
+      const o = (y * sw + x) * 3, n = D * D; sm[o] = Math.sqrt(r / n * g[0]); sm[o + 1] = Math.sqrt(gg / n * g[1]); sm[o + 2] = Math.sqrt(b / n * g[2]);
+    }
+    const W2C = m3T(cam.C2W), ctr = cam.center || [0, 0, 0], par = !!(depth && cam.center);
+    for (let v = 0; v < LH; v++) {
+      const lat = Math.PI / 2 - (v + 0.5) / LH * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
+      for (let u = 0; u < LW; u++) {
+        const lon = (u + 0.5) / LW * 2 * Math.PI - Math.PI;
+        let dx = cl * Math.sin(lon), dy = cl * Math.cos(lon), dz = sl;
+        if (par) { const q = depthAt(depth, lon, lat); dx -= q * ctr[0]; dy -= q * ctr[1]; dz -= q * ctr[2]; }
+        const cz = W2C[6] * dx + W2C[7] * dy + W2C[8] * dz; if (cz <= 1e-6) continue;
+        const x = f * (W2C[0] * dx + W2C[1] * dy + W2C[2] * dz) / cz + cam.cx, y = f * (W2C[3] * dx + W2C[4] * dy + W2C[5] * dz) / cz + cam.cy;
+        if (x < 1 || y < 1 || x > cam.w - 2 || y > cam.h - 2) continue;
+        const cell = v * LW + u; if (nc[cell] >= K) continue;
+        const wx = 1 - Math.abs((x - cam.cx) / (cam.cx + 0.5)), wy = 1 - Math.abs((y - cam.cy) / (cam.cy + 0.5));
+        const sx = Math.min(sw - 1.001, Math.max(0, (x + 0.5) / D - 0.5)), sy = Math.min(sh - 1.001, Math.max(0, (y + 0.5) / D - 0.5));
+        const x0 = sx | 0, y0 = sy | 0, fx = sx - x0, fy = sy - y0, k = cell * K + nc[cell];
+        for (let c = 0; c < 3; c++) {
+          const p = (y0 * sw + x0) * 3 + c;
+          candC[k * 3 + c] = (sm[p] * (1 - fx) + sm[p + 3] * fx) * (1 - fy) + (sm[p + sw * 3] * (1 - fx) + sm[p + sw * 3 + 3] * fx) * fy;
+        }
+        candI[k] = ci; candW[k] = wx * wy; nc[cell]++;
+      }
+    }
+    if (report) report(0.3 * (ci + 1) / NI);
+  }
+  // данные: центр кадра + согласие с медианой
+  const dataC = new Float32Array(NC * K);
+  const med = [0, 0, 0], tmp = [[], [], []];
+  for (let cell = 0; cell < NC; cell++) {
+    const n = nc[cell]; if (!n) continue;
+    let useMed = n >= 3;
+    if (useMed) for (let c = 0; c < 3; c++) { const a = tmp[c]; a.length = 0; for (let k = 0; k < n; k++) a.push(candC[(cell * K + k) * 3 + c]); a.sort((x, y) => x - y); med[c] = a[n >> 1]; }
+    for (let k = 0; k < n; k++) {
+      const q = cell * K + k; let d = 0.03 * (1 - candW[q]);
+      if (useMed) { const e = Math.abs(candC[q * 3] - med[0]) + Math.abs(candC[q * 3 + 1] - med[1]) + Math.abs(candC[q * 3 + 2] - med[2]); d += 1.2 * Math.max(0, e - 0.04); }
+      if (candW[q] < 0.08) d += 0.3 * (0.08 - candW[q]) / 0.08; // у самого края кадра — неохотно
+      dataC[q] = d;
+    }
+  }
+  const slot = (cell, img) => { const n = nc[cell]; for (let k = 0; k < n; k++) if (candI[cell * K + k] === img) return cell * K + k; return -1; };
+  // начальная разметка — ближайший к центру кадр
+  const lab = new Int16Array(NC).fill(-1);
+  for (let cell = 0; cell < NC; cell++) { let best = -1, bw = -1; for (let k = 0; k < nc[cell]; k++) { const q = cell * K + k; if (candW[q] > bw) { bw = candW[q]; best = candI[q]; } } lab[cell] = best; }
+  const BIG = 2.0, LAMS = 1.0;
+  const colDiff = (cell, a, b) => {
+    if (a === b) return 0;
+    const qa = slot(cell, a), qb = slot(cell, b); if (qa < 0 || qb < 0) return BIG;
+    return Math.abs(candC[qa * 3] - candC[qb * 3]) + Math.abs(candC[qa * 3 + 1] - candC[qb * 3 + 1]) + Math.abs(candC[qa * 3 + 2] - candC[qb * 3 + 2]);
+  };
+  const Spq = (p, q, a, b, wgt) => (a === b ? 0 : LAMS * wgt * (colDiff(p, a, b) + colDiff(q, a, b)));
+  const dcost = (cell, img) => { const q = slot(cell, img); return q < 0 ? Infinity : dataC[q]; };
+  const rowW = new Float32Array(LH); for (let v = 0; v < LH; v++) rowW[v] = Math.max(0.05, Math.cos(Math.PI / 2 - (v + 0.5) / LH * Math.PI));
+  const nodeOf = new Int32Array(NC).fill(-1);
+  for (let cycle = 0; cycle < 2; cycle++) {
+    let changed = 0;
+    for (let alpha = 0; alpha < NI; alpha++) {
+      // узлы: ячейки, где виден кадр alpha и метка ещё не alpha
+      const nodes = [];
+      for (let cell = 0; cell < NC; cell++) { nodeOf[cell] = -1; if (lab[cell] !== alpha && lab[cell] >= 0 && slot(cell, alpha) >= 0) { nodeOf[cell] = nodes.length; nodes.push(cell); } }
+      if (!nodes.length) continue;
+      const S = nodes.length, T = S + 1, g = new MaxFlow(S + 2, S * 6);
+      const U0 = new Float64Array(S), U1 = new Float64Array(S);
+      for (let k = 0; k < S; k++) { const cell = nodes[k]; U1[k] = dcost(cell, alpha); U0[k] = dcost(cell, lab[cell]); }
+      for (let k = 0; k < S; k++) {
+        const p = nodes[k], v = (p / LW) | 0, u = p - v * LW;
+        const nbs = [[v * LW + (u + 1) % LW, rowW[v]], [v < LH - 1 ? p + LW : -1, 1]];
+        if (true) { // соседи слева/сверху, не являющиеся узлами — учитываем как унарные
+          const left = v * LW + (u + LW - 1) % LW, up = v > 0 ? p - LW : -1;
+          if (left >= 0 && nodeOf[left] < 0 && lab[left] >= 0) { U1[k] += Spq(p, left, alpha, lab[left], rowW[v]); U0[k] += Spq(p, left, lab[p], lab[left], rowW[v]); }
+          if (up >= 0 && nodeOf[up] < 0 && lab[up] >= 0) { U1[k] += Spq(p, up, alpha, lab[up], 1); U0[k] += Spq(p, up, lab[p], lab[up], 1); }
+        }
+        for (const [q, wgt] of nbs) {
+          if (q < 0 || lab[q] < 0) continue;
+          const kq = nodeOf[q];
+          if (kq < 0) { U1[k] += Spq(p, q, alpha, lab[q], wgt); U0[k] += Spq(p, q, lab[p], lab[q], wgt); continue; }
+          const A = Spq(p, q, lab[p], lab[q], wgt), B = Spq(p, q, lab[p], alpha, wgt), Cc = Spq(p, q, alpha, lab[q], wgt), Dd = 0;
+          // E = A + (Cc−A)·xp + (Dd−Cc)·xq + (B+Cc−A−Dd)·(1−xp)·xq
+          const c1 = Cc - A, c2 = Dd - Cc;
+          if (c1 >= 0) U1[k] += c1; else U0[k] -= c1;
+          if (c2 >= 0) U1[kq] += c2; else U0[kq] -= c2;
+          const w = B + Cc - A - Dd; if (w > 1e-9) g.edge(k, kq, w, 0);
+        }
+      }
+      for (let k = 0; k < S; k++) {
+        let a = U1[k], b = U0[k]; if (!isFinite(a)) a = 1e6; if (!isFinite(b)) b = 1e6;
+        const m = Math.min(a, b); a -= m; b -= m;
+        if (a > 0) g.edge(S, k, a, 0); if (b > 0) g.edge(k, T, b, 0);
+      }
+      const { sourceSide } = g.run(S, T);
+      // x=1 (берём alpha) ⇔ вершина на стороне стока
+      for (let k = 0; k < S; k++) if (!sourceSide[k]) { lab[nodes[k]] = alpha; changed++; }
+      if (report) report(0.3 + 0.7 * (cycle * NI + alpha + 1) / (2 * NI));
+    }
+    if (!changed) break;
+  }
+  return { LW, LH, lab };
+}
+// мягкие веса шва для кадра: размытый индикатор «эта ячейка взята из кадра i»
+function seamWeights(seams, ci, sigma) {
+  const { LW, LH, lab } = seams, a = new Float32Array(LW * LH), b = new Float32Array(LW * LH);
+  let any = false; for (let k = 0; k < a.length; k++) if (lab[k] === ci) { a[k] = 1; any = true; }
+  if (!any) return null;
+  const r = Math.ceil(sigma * 2.5), ker = []; let ks = 0; for (let i = -r; i <= r; i++) { const v = Math.exp(-i * i / (2 * sigma * sigma)); ker.push(v); ks += v; }
+  for (let i = 0; i < ker.length; i++) ker[i] /= ks;
+  for (let v = 0; v < LH; v++) for (let u = 0; u < LW; u++) { let s = 0; for (let i = -r; i <= r; i++) s += ker[i + r] * a[v * LW + ((u + i) % LW + LW) % LW]; b[v * LW + u] = s; }
+  for (let v = 0; v < LH; v++) for (let u = 0; u < LW; u++) { let s = 0; for (let i = -r; i <= r; i++) s += ker[i + r] * b[Math.max(0, Math.min(LH - 1, v + i)) * LW + u]; a[v * LW + u] = s; }
+  return a;
+}
+
 // ───────────────────────── сшивка в equirectangular ─────────────────────────
 function lowBand(cam) {
   const D = 8, w = cam.w, h = cam.h, lw = Math.ceil(w / D), lh = Math.ceil(h / D);
@@ -842,16 +1248,21 @@ function lowBand(cam) {
   return { lw, lh, D, a };
 }
 
-function compose(cams, f, gains, W, progress) {
+function compose(cams, f, gains, W, progress, depth, seams) {
   const H = W / 2, rgba = new Uint8ClampedArray(W * H * 4), covered = new Uint8Array(W * H);
   const sinL = new Float64Array(W), cosL = new Float64Array(W);
   for (let u = 0; u < W; u++) { const lon = (u + 0.5) / W * 2 * Math.PI - Math.PI; sinL[u] = Math.sin(lon); cosL[u] = Math.cos(lon); }
+  const iDmax = depth ? Math.max(...depth.iD) : 0;
   const info = cams.map(c => {
     const W2C = m3T(c.C2W);
-    const half = Math.atan(Math.hypot(c.cx + 1, c.cy + 1) / f);
+    const ctr = c.center || [0, 0, 0], cn = Math.hypot(ctr[0], ctr[1], ctr[2]);
+    const half = Math.atan(Math.hypot(c.cx + 1, c.cy + 1) / f) + (depth ? Math.min(0.6, Math.asin(Math.min(1, iDmax * cn)) * 1.2) : 0);
     const fw = camForward(c.C2W), ll = lonLatFromDir(fw);
-    return { W2C, czMin: Math.cos(Math.min(half + 0.02, Math.PI / 2 - 0.01)), latC: ll[1], half: half + 0.03, lb: c.low || (c.low = lowBand(c)) };
+    const ci = cams.indexOf(c);
+    const sw = seams ? { hi: seamWeights(seams, ci, 1.2), lo: seamWeights(seams, ci, 2.5) } : null;
+    return { W2C, ctr, sw, par: depth && cn > 1e-9, czMin: Math.cos(Math.min(half + 0.02, Math.PI / 2 - 0.01)), latC: ll[1], half: half + 0.03, lb: c.low || (c.low = lowBand(c)) };
   });
+  const iDrow = new Float32Array(W);
   const BH = 64;
   const acc = new Float32Array(W * BH * 8);
   for (let v0 = 0; v0 < H; v0 += BH) {
@@ -864,6 +1275,10 @@ function compose(cams, f, gains, W, progress) {
       for (let v = v0; v < v1; v++) {
         const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
         const A = M[6] * cl, B = M[7] * cl, C = M[8] * sl, Rr = Math.hypot(A, B);
+        if (inf.par) for (let u = 0; u < W; u++) iDrow[u] = depthAt(depth, (u + 0.5) / W * 2 * Math.PI - Math.PI, lat);
+        const pc = inf.ctr, par = inf.par, SW = inf.sw;
+        let sRow0 = 0, sRow1 = 0, sFy = 0, LWs = 0;
+        if (SW) { LWs = seams.LW; let sy = (v + 0.5) / H * seams.LH - 0.5; if (sy < 0) sy = 0; if (sy > seams.LH - 1) sy = seams.LH - 1; const y0 = Math.min(seams.LH - 2, Math.floor(sy)); sFy = sy - y0; sRow0 = y0 * LWs; sRow1 = sRow0 + LWs; }
         let uStart, uCount;
         if (Rr < 1e-9) { if (C > inf.czMin) { uStart = 0; uCount = W; } else continue; }
         else {
@@ -879,7 +1294,8 @@ function compose(cams, f, gains, W, progress) {
         const rowBase = (v - v0) * W;
         for (let kk = 0; kk < uCount; kk++) {
           let u = uStart + kk; u = ((u % W) + W) % W;
-          const dx = cl * sinL[u], dy = cl * cosL[u], dz = sl;
+          let dx = cl * sinL[u], dy = cl * cosL[u], dz = sl;
+          if (par) { const q = iDrow[u]; dx -= q * pc[0]; dy -= q * pc[1]; dz -= q * pc[2]; }
           const cz = M[6] * dx + M[7] * dy + M[8] * dz; if (cz <= 1e-6) continue;
           const iz = f / cz;
           const x = (M[0] * dx + M[1] * dy + M[2] * dz) * iz + cam.cx, y = (M[3] * dx + M[4] * dy + M[5] * dz) * iz + cam.cy;
@@ -903,8 +1319,15 @@ function compose(cams, f, gains, W, progress) {
           const Lg = la[q + 1] * l00 + la[q + 4] * l10 + la[qr + 1] * l01 + la[qr + 4] * l11;
           const Lb = la[q + 2] * l00 + la[q + 5] * l10 + la[qr + 2] * l01 + la[qr + 5] * l11;
           const o = (rowBase + u) * 8;
-          acc[o] += w * g[0] * Lr; acc[o + 1] += w * g[1] * Lg; acc[o + 2] += w * g[2] * Lb; acc[o + 3] += w;
-          const w2 = w * w, w4 = w2 * w2, wh = w4 * w4 * w2 + 1e-30;
+          const w2 = w * w, w4 = w2 * w2;
+          let wl = w, wh = w4 * w4 * w2 + 1e-30;
+          if (SW) {
+            let sx = (u + 0.5) / W * LWs - 0.5; const x0 = Math.floor(sx), fx2 = sx - x0, xa = ((x0 % LWs) + LWs) % LWs, xb = (xa + 1) % LWs;
+            const bl = (m) => m ? (m[sRow0 + xa] * (1 - fx2) + m[sRow0 + xb] * fx2) * (1 - sFy) + (m[sRow1 + xa] * (1 - fx2) + m[sRow1 + xb] * fx2) * sFy : 0;
+            const hiS = bl(SW.hi), loS = bl(SW.lo), edge = Math.min(1, w * 12);
+            wl = w * (loS + 1e-3); wh = (hiS * edge + 1e-6 * wh) + 1e-30;
+          }
+          acc[o] += wl * g[0] * Lr; acc[o + 1] += wl * g[1] * Lg; acc[o + 2] += wl * g[2] * Lb; acc[o + 3] += wl;
           acc[o + 4] += wh * g[0] * (r - Lr); acc[o + 5] += wh * g[1] * (gg - Lg); acc[o + 6] += wh * g[2] * (bb - Lb); acc[o + 7] += wh;
         }
       }
@@ -989,12 +1412,13 @@ function downscaleRGBA(rgba, W, H, PW) {
   return { rgba: out, w: PW, h: PH };
 }
 function downscaleMask(covered, W, H, PW) {
-  const PH = PW / 2, out = new Uint8Array(PW * PH), s = W / PW;
+  // два канала: [доля «не снято» (залито или ИИ), доля «дорисовано ИИ»]
+  const PH = PW / 2, out = new Uint8Array(PW * PH * 2), s = W / PW;
   for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
-    let c = 0, n = 0;
+    let real = 0, ai = 0, n = 0;
     const ya = Math.floor(y * s), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * s))), xa = Math.floor(x * s), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * s)));
-    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { c += covered[yy * W + xx]; n++; }
-    out[y * PW + x] = Math.round(255 * (1 - c / n));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const v = covered[yy * W + xx]; if (v === 1) real++; else if (v >= 2) ai++; n++; }
+    out[(y * PW + x) * 2] = Math.round(255 * (n - real) / n); out[(y * PW + x) * 2 + 1] = Math.round(255 * ai / n);
   }
   return out;
 }
@@ -1053,16 +1477,44 @@ function stitchPanorama(frames, opts, report) {
     ba2 = runBA(pairsB, 30, 70) || ba2;
   }
   say('ba2', 1, ba2 ? ba2.rms.toFixed(2) : '—');
+  // 4б. параллакс: если телефон двигался (съёмка с рук), уточняем центры кадров и глубину сцены
+  let pba = null, points = null;
+  // съёмка «вокруг объектива» даёт ошибку поворотной модели ≲1 px — там параллакс-модель только добавляет свобод
+  if (ba2 && opts.parallax !== false && (ba2.rms > (opts.parallaxMinRms || 1.2) || opts.parallax === true)) {
+    const all = []; for (const p of pairsB) { const ms = p.matches, step = Math.max(1, ms.length / 120); for (let q = 0; q < ms.length; q += step) all.push([p.i, p.j, ms[q | 0]]); }
+    const n = all.length, M = { n, i: new Int32Array(n), j: new Int32Array(n), xi: new Float64Array(n), yi: new Float64Array(n), xj: new Float64Array(n), yj: new Float64Array(n) };
+    all.forEach(([i, j, m], k) => { M.i[k] = i; M.j[k] = j; M.xi[k] = m.xi - cams[i].cx; M.yi[k] = m.yi - cams[i].cy; M.xj[k] = m.xj - cams[j].cx; M.yj[k] = m.yj - cams[j].cy; });
+    say('parallax', 0);
+    const r = bundleAdjustParallax(cams, M, f, 40, fr => say('parallax', fr));
+    // считаем параллакс реальным, если ошибка заметно упала
+    if (r.rms < 0.7 * ba2.rms) {
+      pba = r; cams.forEach((c, k) => { c.C2W = r.C2W[k]; c.center = r.centers[k]; }); f = r.f;
+      points = [];
+      for (let k = 0; k < n; k++) {
+        if (r.per[k] > Math.max(3, 3 * r.rms)) continue;
+        const i = M.i[k], q = Math.exp(r.s[k]); if (q < 1e-4) continue;
+        const w = rayW(cams[i].C2W, M.xi[k], M.yi[k], f), c = cams[i].center;
+        points.push([c[0] + w[0] / q, c[1] + w[1] / q, c[2] + w[2] / q]);
+      }
+      // плотные точки вдоль эпиполярных линий: близкие предметы (витрины, колонны)
+      say('depth', 0);
+      const ep = epipolarPoints(cams, f, cand, fr => say('depth', fr));
+      for (const p of ep) points.push(p);
+      say('depth', 1, String(ep.length));
+    }
+    say('parallax', 1, (pba ? pba.rms : ba2.rms).toFixed(2));
+  }
   // 5. гравитация: поворачиваем решение к гироскопу (в среднем), затем ставим первый кадр в центр
   {
     const Msum = new Float64Array(9);
     for (const c of cams) { const P = m3mul(c.C2Wprior, m3T(c.C2W)); for (let k = 0; k < 9; k++) Msum[k] += P[k]; }
     const G = polar3(Msum);
-    cams.forEach(c => { c.C2W = m3mul(G, c.C2W); });
-    const lon0 = lonLatFromDir(camForward(cams[0].C2W))[0];
-    const Rz = rotZ(lon0);
-    cams.forEach(c => { c.C2W = m3mul(Rz, c.C2W); });
+    const lon0 = lonLatFromDir(camForward(m3mul(G, cams[0].C2W)))[0];
+    const T = m3mul(rotZ(lon0), G);
+    cams.forEach(c => { c.C2W = m3mul(T, c.C2W); if (c.center) c.center = mv(T, c.center); });
+    if (points) points = points.map(p => mv(T, p));
   }
+  const depth = points && points.length > 50 ? buildDepthField(points, opts.depthGW || 192, (opts.depthGW || 192) / 2, opts.depthSmooth) : null;
   // связность: кадры без единой пары остаются на гироскопе
   const linked = new Uint8Array(cams.length); for (const p of pairsB) { linked[p.i] = 1; linked[p.j] = 1; }
   // 6. экспозиция
@@ -1074,22 +1526,191 @@ function stitchPanorama(frames, opts, report) {
   // освобождаем пирамиды
   cams.forEach(c => { c.pyr = null; c.corners = null; });
   say('compose', 0);
-  const out = compose(cams, f, gains, W, fr => say('compose', fr));
-  say('fill', 0);
+  let seams = null;
+  if (opts.seams !== false) { say('seams', 0); seams = seamLabels(cams, f, gains, depth, opts.seamW || 512, fr => say('seams', fr)); say('seams', 1); }
+  const out = compose(cams, f, gains, W, fr => say('compose', fr), depth, seams);
   let cov = 0; for (let i = 0; i < out.covered.length; i++) cov += out.covered[i];
-  const holes = fillHoles(out.rgba, out.covered, out.W, out.H);
-  say('fill', 1);
+  let holes = out.W * out.H - cov;
+  if (!opts.deferFill) { say('fill', 0); holes = fillHoles(out.rgba, out.covered, out.W, out.H); say('fill', 1); }
   const nMatches = pairsB.reduce((s, p) => s + p.matches.length, 0);
   const hfovMax = 2 * Math.atan(Math.max(...cams.map(c => Math.max(c.w, c.h))) / 2 / f) * 180 / Math.PI;
   return {
     rgba: out.rgba, covered: out.covered, W: out.W, H: out.H,
     stats: {
       frames: cams.length, pairs: pairsB.length, candidates: cand.length, matches: nMatches,
-      rms: ba2 ? ba2.rms : null, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
+      rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
       coverage: cov / (out.W * out.H), holes, gains: gains.map(g => g.map(v => +v.toFixed(3))), ms: Date.now() - t0
     },
-    cams: cams.map(c => Array.from(c.C2W))
+    cams: cams.map(c => Array.from(c.C2W)), centers: cams.map(c => c.center || [0, 0, 0]), depth, points: opts.debugPoints ? points : undefined
   };
+}
+
+// ───────────────────────── перспективный вид из сферы и обратно ─────────────────────────
+// Билинейная выборка из equirectangular (RGBA) с переходом через ±180°.
+function erpSample(rgba, W, H, d, out, o) {
+  const lon = Math.atan2(d[0], d[1]), lat = Math.asin(Math.max(-1, Math.min(1, d[2])));
+  let x = (lon / (2 * Math.PI) + 0.5) * W - 0.5, y = (0.5 - lat / Math.PI) * H - 0.5;
+  if (y < 0) y = 0; if (y > H - 1) y = H - 1;
+  const x0 = Math.floor(x), y0 = Math.min(H - 2, Math.floor(y)), fx = x - x0, fy = y - y0;
+  const xa = ((x0 % W) + W) % W, xb = (xa + 1) % W;
+  const p00 = (y0 * W + xa) * 4, p10 = (y0 * W + xb) * 4, p01 = ((y0 + 1) * W + xa) * 4, p11 = ((y0 + 1) * W + xb) * 4;
+  for (let c = 0; c < 3; c++) out[o + c] = (rgba[p00 + c] * (1 - fx) + rgba[p10 + c] * fx) * (1 - fy) + (rgba[p01 + c] * (1 - fx) + rgba[p11 + c] * fx) * fy;
+}
+// квадратный перспективный кадр size×size, поле зрения fov (рад), ориентация C2W
+function renderPerspective(rgba, W, H, C2W, fov, size) {
+  const out = new Uint8ClampedArray(size * size * 4), t = Math.tan(fov / 2), c = (size - 1) / 2, d = [0, 0, 0];
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const vx = (x - c) / c * t, vy = (y - c) / c * t, n = Math.sqrt(vx * vx + vy * vy + 1);
+    d[0] = (C2W[0] * vx + C2W[1] * vy + C2W[2]) / n; d[1] = (C2W[3] * vx + C2W[4] * vy + C2W[5]) / n; d[2] = (C2W[6] * vx + C2W[7] * vy + C2W[8]) / n;
+    const o = (y * size + x) * 4; erpSample(rgba, W, H, d, out, o); out[o + 3] = 255;
+  }
+  return out;
+}
+// обход пикселей сферы, попадающих в квадратный кадр (C2W, fov): cb(index, x, y) с координатами в кадре
+function forEachErpInView(W, H, C2W, fov, size, cb) {
+  const t = Math.tan(fov / 2), c = (size - 1) / 2, f = c / t;
+  const half = Math.atan(t * Math.SQRT2) + 0.01, czMin = Math.cos(Math.min(half, Math.PI / 2 - 0.01));
+  const fw = camForward(C2W), latC = Math.asin(Math.max(-1, Math.min(1, fw[2])));
+  const v0 = Math.max(0, Math.floor((0.5 - (latC + half) / Math.PI) * H) - 1), v1 = Math.min(H - 1, Math.ceil((0.5 - (latC - half) / Math.PI) * H) + 1);
+  for (let v = v0; v <= v1; v++) {
+    const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
+    const A = C2W[2] * cl, B = C2W[5] * cl, C = C2W[8] * sl, Rr = Math.hypot(A, B);
+    let uStart = 0, uCount = W;
+    if (Rr < 1e-9) { if (C <= czMin) continue; }
+    else {
+      const ratio = (czMin - C) / Rr; if (ratio >= 1) continue;
+      if (ratio > -1) { const lam0 = Math.atan2(A, B), hw = Math.acos(ratio); uStart = Math.ceil((lam0 - hw + Math.PI) / (2 * Math.PI) * W - 0.5); uCount = Math.min(W, Math.floor((lam0 + hw + Math.PI) / (2 * Math.PI) * W - 0.5) - uStart + 1); }
+    }
+    for (let k = 0; k < uCount; k++) {
+      const u = (((uStart + k) % W) + W) % W, lon = (u + 0.5) / W * 2 * Math.PI - Math.PI;
+      const dx = cl * Math.sin(lon), dy = cl * Math.cos(lon), dz = sl;
+      const cz = C2W[2] * dx + C2W[5] * dy + C2W[8] * dz; if (cz <= 1e-6) continue;
+      const x = f * (C2W[0] * dx + C2W[3] * dy + C2W[6] * dz) / cz + c, y = f * (C2W[1] * dx + C2W[4] * dy + C2W[7] * dz) / cz + c;
+      if (x < 0 || y < 0 || x > size - 1 || y > size - 1) continue;
+      cb(v * W + u, x, y);
+    }
+  }
+}
+
+// ───────────────────────── ИИ-дорисовка пустот ─────────────────────────
+// covered: 0 — нет снимка, 1 — реальный кадр, 2 — дорисовано ИИ. run(tileRGBA, mask(0 — дорисовать), S) → Promise<RGBA S×S>.
+// Мелкие пустоты — отдельным тайлом по их центру; большие (потолок/пол) — гранями куба, сначала те, где больше контекста.
+async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
+  opts = opts || {};
+  const LW = 256, LH = 128, hole = new Uint8Array(LW * LH);
+  let any = 0;
+  for (let v = 0; v < H; v++) { const y = Math.min(LH - 1, (v * LH / H) | 0); for (let u = 0; u < W; u += 2) if (!covered[v * W + u]) { const k = y * LW + Math.min(LW - 1, (u * LW / W) | 0); if (!hole[k]) { hole[k] = 1; any++; } } }
+  if (!any) return 0;
+  const cellDir = k => { const y = (k / LW) | 0, x = k - y * LW; return dirFromLonLat((x + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / LH * Math.PI); };
+  // угловое расстояние каждой пустой ячейки до снятого (Дейкстра по сетке)
+  const dist = new Float32Array(LW * LH).fill(Infinity), cellH = Math.PI / LH;
+  const heap = [];
+  const push = (k, d) => { heap.push([d, k]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  for (let k = 0; k < LW * LH; k++) if (!hole[k]) { dist[k] = 0; push(k, 0); }
+  while (heap.length) {
+    const [d, k] = pop(); if (d > dist[k]) continue;
+    const y = (k / LW) | 0, x = k - y * LW, cw = Math.max(0.02, Math.cos(Math.PI / 2 - (y + 0.5) / LH * Math.PI)) * 2 * Math.PI / LW;
+    for (const [dx, dy, c] of [[1, 0, cw], [-1, 0, cw], [0, 1, cellH], [0, -1, cellH]]) {
+      const yy = y + dy; if (yy < 0 || yy >= LH) continue; const kk = yy * LW + (x + dx + LW) % LW, nd = d + c;
+      if (nd < dist[kk]) { dist[kk] = nd; push(kk, nd); }
+    }
+  }
+  // компоненты связности (с переходом через ±180°)
+  const comp = new Int32Array(LW * LH).fill(-1), comps = [];
+  for (let k0 = 0; k0 < LW * LH; k0++) {
+    if (!hole[k0] || comp[k0] >= 0) continue;
+    const id = comps.length, stack = [k0], cells = []; comp[k0] = id;
+    while (stack.length) {
+      const k = stack.pop(); cells.push(k); const y = (k / LW) | 0, x = k - y * LW;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy; if (yy < 0 || yy >= LH) continue; const xx = (x + dx + LW) % LW, kk = yy * LW + xx;
+        if (hole[kk] && comp[kk] < 0) { comp[kk] = id; stack.push(kk); }
+      }
+    }
+    comps.push(cells);
+  }
+  const reach = (opts.reach || 15) * Math.PI / 180;
+  const eligible = new Uint8Array(LW * LH); // ячейки, которые ИИ имеет право дорисовать
+  const tiles = [];
+  for (const cells of comps) {
+    let sx = 0, sy = 0, sz = 0, wsum = 0, maxd = 0;
+    for (const k of cells) { const d = cellDir(k), a = Math.max(0.05, Math.sqrt(1 - d[2] * d[2])); sx += d[0] * a; sy += d[1] * a; sz += d[2] * a; wsum += a; maxd = Math.max(maxd, dist[k]); }
+    const n = Math.hypot(sx, sy, sz), c = [sx / n, sy / n, sz / n];
+    let rad = 0; for (const k of cells) { const d = cellDir(k); rad = Math.max(rad, Math.acos(Math.max(-1, Math.min(1, d[0] * c[0] + d[1] * c[1] + d[2] * c[2])))); }
+    rad += 1.5 * cellH;
+    if (n / wsum > 0.5 && rad < 40 * Math.PI / 180) {
+      // небольшая пустота — целиком одним тайлом с запасом контекста
+      for (const k of cells) eligible[k] = 1;
+      const ll = lonLatFromDir(c);
+      tiles.push({ lon: ll[0], lat: ll[1], fov: Math.max((opts.minFov || 60) * Math.PI / 180, Math.min(110 * Math.PI / 180, (opts.fovScale || 4) * rad + 0.2)), area: cells.length });
+    } else {
+      // большая (потолок/пол у панорамы с телефона) — продолжаем текстуру полосой вдоль края снятого
+      const todo = [];
+      for (const k of cells) if (dist[k] <= reach) { eligible[k] = 1; if (dist[k] >= reach * 0.25 && dist[k] <= reach * 0.75) todo.push(k); }
+      const F = 110 * Math.PI / 180, cover = 0.7 * F / 2, used = new Uint8Array(todo.length);
+      for (let a0 = 0; a0 < todo.length; a0++) {
+        if (used[a0]) continue;
+        const d0 = cellDir(todo[a0]);
+        // центр тайла — чуть в сторону снятого, чтобы в кадре был контекст
+        for (let b0 = a0; b0 < todo.length; b0++) { if (used[b0]) continue; const d = cellDir(todo[b0]); if (d[0] * d0[0] + d[1] * d0[1] + d[2] * d0[2] > Math.cos(cover)) used[b0] = 1; }
+        const ll = lonLatFromDir(d0), toward = ll[1] > 0 ? -1 : 1;
+        tiles.push({ lon: ll[0], lat: ll[1] + toward * reach * 0.6, fov: F, area: 1e9 });
+      }
+    }
+  }
+  tiles.sort((a, b) => a.area - b.area);
+  const S = opts.tile || 768;
+  let filled = 0;
+  const elig = (u, v) => eligible[Math.min(LH - 1, (v * LH / H) | 0) * LW + Math.min(LW - 1, (u * LW / W) | 0)];
+  for (let t = 0; t < tiles.length; t++) {
+    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat);
+    const img = renderPerspective(rgba, W, H, C2W, T.fov, S);
+    // маска: 0 там, где на сфере пусто (с расширением на 2 px); недоступное ИИ — тоже маскируем, но не записываем
+    const raw = new Uint8Array(S * S), tt = Math.tan(T.fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
+    let nh = 0;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const vx = (x - cc) / cc * tt, vy = (y - cc) / cc * tt, nn = Math.sqrt(vx * vx + vy * vy + 1);
+      d[0] = (C2W[0] * vx + C2W[1] * vy + C2W[2]) / nn; d[1] = (C2W[3] * vx + C2W[4] * vy + C2W[5]) / nn; d[2] = (C2W[6] * vx + C2W[7] * vy + C2W[8]) / nn;
+      const lon = Math.atan2(d[0], d[1]), lat = Math.asin(Math.max(-1, Math.min(1, d[2])));
+      const u = Math.min(W - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * W))), v = Math.min(H - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * H)));
+      if (!covered[v * W + u]) { raw[y * S + x] = 1; if (elig(u, v)) nh++; }
+    }
+    if (nh < 30) { if (report) report((t + 1) / tiles.length); continue; }
+    const mask = new Uint8Array(S * S).fill(255), R = 2;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      if (!raw[y * S + x]) continue;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) mask[yy * S + xx] = 0; }
+    }
+    const out = await run(img, mask, S);
+    forEachErpInView(W, H, C2W, T.fov, S, (idx, x, y) => {
+      if (covered[idx]) return;
+      const v = (idx / W) | 0, u = idx - v * W; if (!elig(u, v)) return;
+      const x0 = Math.min(S - 2, Math.floor(x)), y0 = Math.min(S - 2, Math.floor(y)), fx = x - x0, fy = y - y0, p = (y0 * S + x0) * 4, o = idx * 4;
+      for (let c = 0; c < 3; c++) rgba[o + c] = (out[p + c] * (1 - fx) + out[p + 4 + c] * fx) * (1 - fy) + (out[p + S * 4 + c] * (1 - fx) + out[p + S * 4 + 4 + c] * fx) * fy;
+      rgba[o + 3] = 255; covered[idx] = 2; filled++;
+    });
+    if (report) report((t + 1) / tiles.length);
+  }
+  return filled;
+}
+// Исправление кистью: тайл C2W/fov размером S, маска (0 — перерисовать) уже готова; out — ответ модели.
+// Возвращает копию старых пикселей для отмены.
+function applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha) {
+  const undo = { idx: [], px: [], cov: [] };
+  forEachErpInView(W, H, C2W, fov, S, (idx, x, y) => {
+    const x0 = Math.min(S - 2, Math.floor(x)), y0 = Math.min(S - 2, Math.floor(y)), fx = x - x0, fy = y - y0;
+    const a = (alpha[y0 * S + x0] * (1 - fx) + alpha[y0 * S + x0 + 1] * fx) * (1 - fy) + (alpha[(y0 + 1) * S + x0] * (1 - fx) + alpha[(y0 + 1) * S + x0 + 1] * fx) * fy;
+    if (a <= 0.002) return;
+    const p = (y0 * S + x0) * 4, o = idx * 4;
+    undo.idx.push(idx); undo.px.push(rgba[o], rgba[o + 1], rgba[o + 2]); undo.cov.push(covered[idx]);
+    for (let c = 0; c < 3; c++) {
+      const v = (out[p + c] * (1 - fx) + out[p + 4 + c] * fx) * (1 - fy) + (out[p + S * 4 + c] * (1 - fx) + out[p + S * 4 + 4 + c] * fx) * fy;
+      rgba[o + c] = rgba[o + c] * (1 - a) + v * a;
+    }
+    if (a > 0.5) covered[idx] = 3;
+  });
+  return undo;
 }
 
 // ───────────────────────── панорама телефона → сфера ─────────────────────────
@@ -1164,8 +1785,8 @@ function phonePanoToERP(src, opts, report) {
   }
   for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
   let cov = 0; for (let i = 0; i < covered.length; i++) cov += covered[i];
-  if (report) report({ stage: 'fill', frac: 0 });
-  const holes = fillHoles(rgba, covered, W, H);
+  let holes = W * H - cov;
+  if (!opts.deferFill) { if (report) report({ stage: 'fill', frac: 0 }); holes = fillHoles(rgba, covered, W, H); }
   return { rgba, covered, W, H, stats: { frames: 1, coverage: cov / (W * H), holes } };
 }
 function bilinRGB(rgb, w, h, x, y, out, o) {
@@ -1187,13 +1808,66 @@ function vnoise(x, y) {
 }
 function fbm(x, y, oct) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < oct; i++) { s += a * vnoise(x * f, y * f); f *= 2.03; a *= 0.5; } return s; }
 const PAL = [[0.55, 0.12, 0.08], [0.08, 0.22, 0.45], [0.75, 0.55, 0.15], [0.12, 0.35, 0.2], [0.4, 0.15, 0.4], [0.85, 0.75, 0.6], [0.05, 0.08, 0.12]];
-function demoScene(d) {
+// Демо-зал: стены, паркет, кессонный потолок, картины, колонна, витрина с вазой, скамья, (опционально) прохожий.
+// o — точка съёмки (м), d — единичное направление. Возвращает линейный RGB.
+function rayBox(o, d, x0, x1, y0, y1, z0, z1) {
+  let tn = -Infinity, tf = Infinity, ax = -1;
+  const lo = [x0, y0, z0], hi = [x1, y1, z1];
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(d[k]) < 1e-12) { if (o[k] < lo[k] || o[k] > hi[k]) return null; continue; }
+    let ta = (lo[k] - o[k]) / d[k], tb = (hi[k] - o[k]) / d[k]; if (ta > tb) { const s = ta; ta = tb; tb = s; }
+    if (ta > tn) { tn = ta; ax = k; } if (tb < tf) tf = tb; if (tn > tf) return null;
+  }
+  return tn > 1e-6 ? { t: tn, ax } : null;
+}
+function raySphere(o, d, c, r) {
+  const ox = o[0] - c[0], oy = o[1] - c[1], oz = o[2] - c[2];
+  const b = ox * d[0] + oy * d[1] + oz * d[2], cc = ox * ox + oy * oy + oz * oz - r * r, disc = b * b - cc;
+  if (disc < 0) return null; const t = -b - Math.sqrt(disc); return t > 1e-6 ? t : null;
+}
+function rayCyl(o, d, cx, cy, r, z0, z1) {
+  const ox = o[0] - cx, oy = o[1] - cy, a = d[0] * d[0] + d[1] * d[1]; if (a < 1e-12) return null;
+  const b = ox * d[0] + oy * d[1], c = ox * ox + oy * oy - r * r, disc = b * b - a * c; if (disc < 0) return null;
+  const t = (-b - Math.sqrt(disc)) / a; if (t <= 1e-6) return null;
+  const z = o[2] + t * d[2]; return z >= z0 && z <= z1 ? t : null;
+}
+function demoSceneRay(o, d, person) {
   const X = 5, Y = 6.5, Zf = -1.6, Zc = 3.4;
   let t = Infinity, face = -1;
-  if (d[0] > 1e-9) { const tt = X / d[0]; if (tt < t) { t = tt; face = 0; } } else if (d[0] < -1e-9) { const tt = -X / d[0]; if (tt < t) { t = tt; face = 1; } }
-  if (d[1] > 1e-9) { const tt = Y / d[1]; if (tt < t) { t = tt; face = 2; } } else if (d[1] < -1e-9) { const tt = -Y / d[1]; if (tt < t) { t = tt; face = 3; } }
-  if (d[2] > 1e-9) { const tt = Zc / d[2]; if (tt < t) { t = tt; face = 4; } } else if (d[2] < -1e-9) { const tt = Zf / d[2]; if (tt < t) { t = tt; face = 5; } }
-  const px = d[0] * t, py = d[1] * t, pz = d[2] * t;
+  const pl = (k, v, f) => { if (Math.abs(d[k]) > 1e-9) { const tt = (v - o[k]) / d[k]; if (tt > 1e-6 && tt < t) { t = tt; face = f; } } };
+  pl(0, X, 0); pl(0, -X, 1); pl(1, Y, 2); pl(1, -Y, 3); pl(2, Zc, 4); pl(2, Zf, 5);
+  let obj = null;
+  const hit = (tt, name, extra) => { if (tt != null && tt < t) { t = tt; obj = name; face = extra; } };
+  hit(rayCyl(o, d, 2.2, 1.6, 0.25, Zf, Zc), 'column', 0);
+  const pb = rayBox(o, d, -1.6, -1.0, 0.8, 1.4, Zf, -0.62); if (pb) hit(pb.t, 'pedestal', pb.ax);
+  hit(raySphere(o, d, [-1.3, 1.1, -0.42], 0.2), 'vase', 0);
+  const bb = rayBox(o, d, -0.9, 0.9, -2.45, -2.0, Zf, -1.15); if (bb) hit(bb.t, 'bench', bb.ax);
+  if (person) {
+    hit(rayCyl(o, d, person[0], person[1], 0.21, Zf, 0.05), 'person', 0);
+    hit(raySphere(o, d, [person[0], person[1], 0.2], 0.12), 'head', 0);
+  }
+  const px = o[0] + d[0] * t, py = o[1] + d[1] * t, pz = o[2] + d[2] * t;
+  if (obj === 'column') {
+    const ang = Math.atan2(py - 1.6, px - 2.2);
+    const v = Math.sin(ang * 3 + pz * 4 + 6 * fbm(ang * 2, pz * 1.5, 4)), k = 0.78 + 0.18 * v * v * v;
+    const sh = 0.75 + 0.25 * Math.cos(ang - 2.2);
+    return [0.82 * k * sh, 0.8 * k * sh, 0.76 * k * sh];
+  }
+  if (obj === 'pedestal') {
+    const g = 0.7 + 0.5 * fbm((face === 0 ? py : px) * 30, pz * 3, 3), s = face === 2 ? 1.1 : 0.8;
+    return [0.16 * g * s, 0.09 * g * s, 0.05 * g * s];
+  }
+  if (obj === 'vase') {
+    const ang = Math.atan2(py - 1.1, px + 1.3), band = Math.sin((pz + 0.42) * 50) > 0.3 ? 1 : 0;
+    const k = 0.6 + 0.4 * Math.max(0, (pz + 0.42) / 0.2 + 0.5);
+    return band ? [0.85 * k, 0.75 * k, 0.4 * k] : [0.08 * k, 0.2 * k * (1 + 0.3 * Math.sin(ang * 6)), 0.55 * k];
+  }
+  if (obj === 'bench') {
+    const g = 0.75 + 0.4 * fbm(px * 12, py * 12 + pz * 12, 3);
+    return [0.3 * g, 0.12 * g, 0.06 * g];
+  }
+  if (obj === 'person') { const s = Math.sin(pz * 18) > 0 ? 1 : 0.85; return pz > -0.6 ? [0.55 * s, 0.08, 0.06] : [0.05, 0.06, 0.12 * s]; }
+  if (obj === 'head') return [0.75, 0.52, 0.4];
   if (face === 5) { // паркет
     const col = Math.floor(px / 0.22), off = hash2(col, 7) * 1.4, vy = py + off, plank = Math.floor(vy / 1.3);
     const hb = hash2(col, plank), tone = 0.55 + 0.45 * hb;
@@ -1223,57 +1897,60 @@ function demoScene(d) {
   const ds = s - sc, dz = z - pzc;
   if (Math.abs(sc) < L - 1 && Math.abs(ds) < pw + 0.09 && Math.abs(dz) < ph + 0.09) {
     if (Math.abs(ds) > pw || Math.abs(dz) > ph) { const k = 0.6 + 0.6 * fbm(ds * 50, dz * 50, 2); return [0.75 * k, 0.55 * k, 0.18 * k]; }
-    const pa = PAL[(slot * 3 + wid * 5 + 70) % PAL.length], pb = PAL[(slot * 7 + wid + 71) % PAL.length], pc = PAL[(slot + wid * 2 + 3) % PAL.length];
+    const pa = PAL[(slot * 3 + wid * 5 + 70) % PAL.length], pb2 = PAL[(slot * 7 + wid + 71) % PAL.length], pc = PAL[(slot + wid * 2 + 3) % PAL.length];
     const n1 = fbm(ds * 3.2 + slot * 9.1, dz * 3.2 + wid * 3.7, 4), n2 = fbm(ds * 9 + 40, dz * 9 - slot, 3);
     const m = Math.max(0, Math.min(1, (n1 - 0.3) * 2.6));
-    for (let q = 0; q < 3; q++) c[q] = pa[q] * (1 - m) + pb[q] * m;
+    for (let q = 0; q < 3; q++) c[q] = pa[q] * (1 - m) + pb2[q] * m;
     if (n2 > 0.62) for (let q = 0; q < 3; q++) c[q] = c[q] * 0.4 + pc[q] * 0.6;
     const lit = 0.85 + 0.25 * (1 - Math.abs(dz) / ph);
     return [c[0] * lit, c[1] * lit, c[2] * lit];
   }
-  // табличка под картиной
   if (Math.abs(sc) < L - 1 && Math.abs(ds - pw * 0.6) < 0.16 && Math.abs(z - (pzc - ph - 0.25)) < 0.07) {
     const line = Math.abs(z - (pzc - ph - 0.25)) < 0.045 && vnoise(ds * 60, slot) > 0.45 && Math.abs(z - (pzc - ph - 0.25)) > 0.008;
     return line ? [0.1, 0.1, 0.1] : [0.85, 0.83, 0.78];
   }
   return c;
 }
-// кадры по плану с «ошибками» пользователя, дрейфом гироскопа, экспозицией и виньетированием
+function demoScene(d) { return demoSceneRay([0, 0, 0], d, null); }
+
+// Кадры по плану с «ошибками» пользователя, дрейфом гироскопа, экспозицией и виньетированием.
+// opts.handheld — радиус (м), на котором телефон вращается вокруг тела (0 — вокруг объектива);
+// opts.person — прохожий в части кадров; opts.k1 — бочкообразная дисторсия объектива.
 function renderDemoFrames(opts, report) {
   const w = opts.w || 600, h = opts.h || 800, fTrue = opts.fTrue || 628;
   const rand = rng(opts.seed || 7);
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rand(); return (s - 3) * 0.7; };
   const hf = 2 * Math.atan(w / 2 / fTrue) * 180 / Math.PI, vf = 2 * Math.atan(h / 2 / fTrue) * 180 / Math.PI;
-  const plan = makePlan(hf, vf);
+  let plan = makePlan(hf, vf, 0.36);
+  if (opts.skipNadir) plan = plan.filter(t => !(t.pole && t.pitch < 0));
   const d2r = Math.PI / 180, frames = [];
+  const hh = opts.handheld || 0, k1 = opts.k1 || 0;
   let drift = 0;
   plan.forEach((t, k) => {
     drift += (opts.drift != null ? opts.drift : 0.12) + 0.25 * gauss();
     const yaw = (t.yaw + 1.8 * gauss()) * d2r, pitch = (t.pole ? t.pitch - Math.sign(t.pitch) * 1.5 : t.pitch + 1.5 * gauss()) * d2r, roll = 2.5 * gauss() * d2r;
-    // камера смотрит на (yaw, pitch), «верх» кадра — к небу; затем крен
-    const fwd = dirFromLonLat(yaw, pitch);
-    let up = [0, 0, 1]; if (Math.abs(fwd[2]) > 0.98) up = [Math.sin(yaw), Math.cos(yaw), 0];
-    let right = normalize3([fwd[1] * up[2] - fwd[2] * up[1], fwd[2] * up[0] - fwd[0] * up[2], fwd[0] * up[1] - fwd[1] * up[0]]);
-    const down = [fwd[1] * right[2] - fwd[2] * right[1], fwd[2] * right[0] - fwd[0] * right[2], fwd[0] * right[1] - fwd[1] * right[0]];
-    let C2W = Float64Array.of(right[0], down[0], fwd[0], right[1], down[1], fwd[1], right[2], down[2], fwd[2]);
-    C2W = m3mul(C2W, rotZ(roll));
+    let C2W = m3mul(c2wLookAt(yaw, pitch), rotZ(roll));
+    // центр съёмки: телефон в вытянутых руках вращается вокруг тела + дрожание
+    const o = [hh * Math.sin(yaw) * Math.cos(pitch) + 0.012 * gauss(), hh * Math.cos(yaw) * Math.cos(pitch) + 0.012 * gauss(), hh * 0.5 * Math.sin(pitch) + 0.012 * gauss()];
+    const person = opts.person && k >= 2 && k <= 6 ? [-2.6 + 1.1 * (k - 2), -3.4] : null;
     const noiseR = expSO3(0.35 * gauss() * d2r, 0.35 * gauss() * d2r, 0.2 * gauss() * d2r);
     const gyro = m3mul(m3mul(rotZ(drift * d2r), noiseR), C2W);
     const gain = 0.82 + 0.36 * rand(), wb = [1 + 0.04 * gauss(), 1, 1 + 0.04 * gauss()];
-    const rgb = new Uint8Array(w * h * 3), cx = (w - 1) / 2, cy = (h - 1) / 2, R2 = cx * cx + cy * cy;
+    const rgb = new Uint8Array(w * h * 3), cx = (w - 1) / 2, cy = (h - 1) / 2, R2 = cx * cx + cy * cy, rn2 = (w * w + h * h) / 4 / (fTrue * fTrue);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      let acc = [0, 0, 0];
+      const acc = [0, 0, 0];
       for (let ss = 0; ss < 2; ss++) {
-        const vx = (x - cx + (ss - 0.5) * 0.5) / fTrue, vy = (y - cy + (0.5 - ss) * 0.5) / fTrue;
+        let vx = (x - cx + (ss - 0.5) * 0.5) / fTrue, vy = (y - cy + (0.5 - ss) * 0.5) / fTrue;
+        if (k1) { const r2 = (vx * vx + vy * vy) / rn2, s = 1 + k1 * r2; vx *= s; vy *= s; }
         const n = Math.sqrt(vx * vx + vy * vy + 1);
         const dw = [(C2W[0] * vx + C2W[1] * vy + C2W[2]) / n, (C2W[3] * vx + C2W[4] * vy + C2W[5]) / n, (C2W[6] * vx + C2W[7] * vy + C2W[8]) / n];
-        const c = demoScene(dw); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2];
+        const c = demoSceneRay(o, dw, person); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2];
       }
       const r2 = ((x - cx) * (x - cx) + (y - cy) * (y - cy)) / R2, vig = 1 - 0.18 * r2;
       const p = (y * w + x) * 3;
       for (let q = 0; q < 3; q++) rgb[p + q] = Math.max(0, Math.min(255, lin2srgb(acc[q] / 2 * gain * wb[q] * vig) + Math.round(gauss() * 1.2)));
     }
-    frames.push({ w, h, rgb, C2W: gyro, C2Wtrue: C2W });
+    frames.push({ w, h, rgb, C2W: gyro, C2Wtrue: C2W, center: o });
     if (report) report({ stage: 'demo', frac: (k + 1) / plan.length });
   });
   return { frames, plan, fTrue, f0: 0.75 * Math.max(w, h) };
@@ -1281,7 +1958,7 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  makePlan, c2wLookAt, stitchPanorama, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, downscaleRGBA, downscaleMask,
+  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };
 </script>
@@ -1292,7 +1969,7 @@ const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup',
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
-const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod };'))();
+const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
 const D2R = Math.PI / 180;
@@ -1301,24 +1978,61 @@ if (!window.isSecureContext) $('#secureWarn').hidden = false;
 
 // ───────────── воркер склейки ─────────────
 const WORKER_GLUE = `
-self.onmessage = (e) => {
+let __ortSess = null;
+async function aiSession(base) {
+  if (__ortSess) return __ortSess;
+  importScripts(base + 'vendor/ort/ort.wasm.min.js');
+  ort.env.wasm.wasmPaths = base + 'vendor/ort/';
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+  ort.env.wasm.proxy = false;
+  __ortSess = await ort.InferenceSession.create(base + 'models/migan_pipeline_v2.onnx', { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  return __ortSess;
+}
+async function aiRun(base, rgba, mask, S) {
+  const sess = await aiSession(base), n = S * S, img = new Uint8Array(3 * n);
+  for (let i = 0; i < n; i++) { img[i] = rgba[i * 4]; img[n + i] = rgba[i * 4 + 1]; img[2 * n + i] = rgba[i * 4 + 2]; }
+  const o = await sess.run({ image: new ort.Tensor('uint8', img, [1, 3, S, S]), mask: new ort.Tensor('uint8', mask, [1, 1, S, S]) });
+  const r = o.result.data, out = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) { out[i * 4] = r[i]; out[i * 4 + 1] = r[n + i]; out[i * 4 + 2] = r[2 * n + i]; out[i * 4 + 3] = 255; }
+  return out;
+}
+self.onmessage = async (e) => {
   const m = e.data;
   const report = r => self.postMessage({ type: 'progress', stage: r.stage, frac: r.frac, note: r.note });
   try {
-    let res, extra = {};
-    if (m.type === 'stitch') res = stitchPanorama(m.frames, m.opts, report);
-    else if (m.type === 'pano') res = phonePanoToERP(m.src, m.opts, report);
-    else if (m.type === 'demo') {
-      const d = renderDemoFrames({ seed: m.seed }, report);
-      res = stitchPanorama(d.frames, Object.assign({ f0: d.f0 }, m.opts), report);
-      extra = { fTrue: d.fTrue };
+    if (m.type === 'inpaint') {
+      const out = await aiRun(m.base, m.img, m.mask, m.S);
+      self.postMessage({ type: 'done', out }, [out.buffer]);
+      return;
     }
+    let res, extra = {};
+    const o = Object.assign({}, m.opts, { deferFill: true });
+    if (m.type === 'stitch') res = stitchPanorama(m.frames, o, report);
+    else if (m.type === 'pano') res = phonePanoToERP(m.src, o, report);
+    else if (m.type === 'demo') {
+      const d = renderDemoFrames({ seed: m.seed, handheld: 0.12, person: true, skipNadir: true }, report);
+      res = stitchPanorama(d.frames, Object.assign({ f0: d.f0 }, o), report);
+      extra = { fTrue: d.fTrue, demo: true };
+    }
+    let holes = 0; for (let i = 0; i < res.covered.length; i++) if (!res.covered[i]) holes++;
+    if (m.opts.ai && holes > 0) {
+      report({ stage: 'ai', frac: 0, note: 'загружаю нейросеть' });
+      try {
+        await aiSession(m.opts.base);
+        let tiles = 0;
+        const n = await aiFillHoles(res.rgba, res.covered, res.W, res.H, async (img, mask, S) => { const r = await aiRun(m.opts.base, img, mask, S); tiles++; return r; }, fr => report({ stage: 'ai', frac: fr, note: 'тайлов: ' + tiles }), {});
+        extra.aiFilled = n / (res.W * res.H); extra.aiTiles = tiles;
+      } catch (err) { extra.aiError = String(err && err.message || err); }
+    }
+    report({ stage: 'fill', frac: 0 });
+    extra.flatFilled = fillHoles(res.rgba, res.covered, res.W, res.H) / (res.W * res.H);
     report({ stage: 'preview', frac: 0 });
     const PW = Math.min(res.W, m.opts.previewW || 4096);
     const pv = downscaleRGBA(res.rgba, res.W, res.H, PW);
-    const mask = downscaleMask(res.covered, res.W, res.H, Math.min(res.W, 2048));
+    const MW = Math.min(res.W, 2048), mask = downscaleMask(res.covered, res.W, res.H, MW);
     const pvBuf = pv.rgba === res.rgba ? pv.rgba.slice() : pv.rgba;
-    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: Math.min(res.W, 2048), stats: Object.assign(res.stats, extra) }, [res.rgba.buffer, pvBuf.buffer, mask.buffer]);
+    const stats = Object.assign(res.stats, extra);
+    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, covered: res.covered, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: MW, stats }, [res.rgba.buffer, res.covered.buffer, pvBuf.buffer, mask.buffer]);
   } catch (err) { self.postMessage({ type: 'error', message: String(err && err.message || err) }); }
 };`;
 let worker = null;
@@ -1336,6 +2050,8 @@ function runJob(msg, transfer) {
     worker.postMessage(msg, transfer || []);
   });
 }
+const BASE = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
+const aiOn = () => $('#optAI').checked;
 function outWidth() { const v = +document.querySelector('input[name=res]:checked').value; return v ? Math.min(v, MAXW) : 0; }
 
 // ───────────── экран обработки ─────────────
@@ -1346,9 +2062,13 @@ const STAGES = {
   ba1: 'Первая связка кадров',
   match2: 'Точное совмещение',
   ba2: 'Связка всех кадров и подбор фокуса',
+  parallax: 'Параллакс: телефон двигался',
+  depth: 'Глубина сцены по эпиполярным линиям',
   gains: 'Выравнивание экспозиции',
+  seams: 'Швы в обход предметов и прохожих',
   compose: 'Сшивка сферы',
-  fill: 'Заполнение пустот',
+  ai: 'ИИ дорисовывает пустоты',
+  fill: 'Плавная заливка остатка',
   preview: 'Подготовка просмотра'
 };
 let stageOrder = [], curStage = null;
@@ -1364,7 +2084,7 @@ function onProgress(m) {
     const k = stageOrder.indexOf(li.dataset.k);
     li.className = k < idx ? 'ok' : k === idx ? 'run' : '';
   }
-  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = 'ошибка ' + m.note + ' px'; }
+  if (m.note) { const li = $('#steps').querySelector(`[data-k="${m.stage}"] .val`); if (li) li.textContent = m.stage === 'depth' ? m.note + ' точек' : m.stage === 'ai' ? m.note : 'ошибка ' + m.note + ' px'; }
   const total = stageOrder.length, frac = Math.max(0, Math.min(1, m.frac || 0));
   $('#procBar').style.width = ((idx + frac) / total * 100).toFixed(1) + '%';
   curStage = m.stage;
@@ -1640,14 +2360,14 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'gains', 'compose', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
   try {
     const { out, transfer } = await decodeFrames(frames);
     const f0 = 0.75 * Math.max(out[0].w, out[0].h);
-    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: 4096 } }, transfer);
+    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }, transfer);
     lastSource = { kind: 'capture' };
     openResult(res);
   } catch (e) { show('home'); toast('Не получилось собрать: ' + e.message, 6000); }
@@ -1655,8 +2375,8 @@ async function stitchCaptured(frames) {
 let lastSource = null;
 $('#btnDemo').addEventListener('click', async () => {
   startProcess('Демо-зал', ['demo'].concat(STITCH_ORDER));
-  $('#procSub').textContent = 'Имитирую съёмку телефоном: 33 кадра с дрейфом гироскопа, разной экспозицией и виньетированием, потом склеиваю.';
-  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: 4096 } }); lastSource = { kind: 'demo' }; openResult(res); }
+  $('#procSub').textContent = 'Имитирую съёмку с рук: телефон ходит по дуге вокруг тела, гироскоп дрейфует, мимо идёт человек, пол не снят. Склейка и нейросеть должны с этим справиться.';
+  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE } }); lastSource = { kind: 'demo' }; openResult(res); }
   catch (e) { show('home'); toast('Ошибка демо: ' + e.message, 6000); }
 });
 
@@ -1698,10 +2418,10 @@ $('#panoV').addEventListener('input', e => { $('#panoVv').textContent = e.target
 $('#panoBack').addEventListener('click', () => { pano.rgb = null; show('home'); });
 $('#panoGo').addEventListener('click', async () => {
   if (!pano.rgb) return;
-  startProcess('Панорама → сфера', ['compose', 'fill', 'preview']);
-  $('#procSub').textContent = 'Перевожу цилиндрическую полосу в equirectangular и заливаю потолок и пол.';
+  startProcess('Панорама → сфера', ['compose', 'ai', 'fill', 'preview']);
+  $('#procSub').textContent = 'Перевожу полосу в equirectangular. Нейросеть продолжает края потолка и пола, дальше — плавный переход в цвет.';
   const src = { w: pano.w, h: pano.h, rgb: pano.rgb };
-  const opts = pano.gpano ? { mode: 'gpano', gpano: pano.gpano, maxW: MAXW, previewW: 4096 } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value, maxW: MAXW, previewW: 4096 };
+  const opts = Object.assign(pano.gpano ? { mode: 'gpano', gpano: pano.gpano } : { mode: 'cyl', hfov: +$('#panoA').value, vshift: +$('#panoV').value }, { maxW: MAXW, previewW: 4096, ai: aiOn(), base: BASE });
   try { const res = await runJob({ type: 'pano', src, opts }); lastSource = { kind: 'pano' }; pano.rgb = null; openResult(res); }
   catch (e) { show('home'); toast('Ошибка: ' + e.message, 6000); }
 });
@@ -1716,7 +2436,7 @@ vec3 look(vec3 d){
   float lon = atan(d.x, d.y); float lat = asin(clamp(d.z, -1., 1.));
   vec2 uv = vec2(lon / 6.2831853 + .5, .5 - lat / 3.1415927);
   vec3 c = texture2D(uTex, uv).rgb;
-  if (uMaskOn > .5) { float m = texture2D(uMask, uv).r; float st = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 16.)); c = mix(c, mix(c * .5, vec3(.95,.42,.26), .55 + .25 * st), m); }
+  if (uMaskOn > .5) { vec4 mk = texture2D(uMask, uv); float st = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 16.)); vec3 tint = mix(vec3(.95,.42,.26), vec3(.62,.48,1.), clamp(mk.a / max(mk.r, .001), 0., 1.)); c = mix(c, mix(c * .5, tint, .55 + .25 * st), mk.r); }
   if (uNadirOn > .5) { float r = (lat + 1.5707963) / uNadirA; if (r < 1.) { vec2 e = normalize(d.xy + 1e-6); vec2 q = vec2(.5 + .5 * r * e.x, .5 - .5 * r * e.y); vec4 n = texture2D(uNadir, q); c = mix(c, n.rgb, n.a); } }
   return c;
 }
@@ -1766,6 +2486,8 @@ function uploadNadir() {
 }
 function openResult(res) {
   view.res = res; show('result');
+  brush.undo = []; $('#bUndo').disabled = true; setBrush(false);
+  $('#brushHint').textContent = 'Закрасьте пальцем место с искажением — двоение, разрыв, человека — и нажмите «Дорисовать».';
   $('#resDims').textContent = `${res.W}×${res.H}`;
   if (!initGL()) { toast('WebGL недоступен — показываю развёртку.'); setFlat(true); }
   else {
@@ -1778,7 +2500,8 @@ function openResult(res) {
     }
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, view.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, pw, ph, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pv.buffer || pv));
-    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, res.mw, res.mw / 2, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, res.mask);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE_ALPHA, res.mw, res.mw / 2, 0, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, res.mask);
+    view.pvTexW = pw; view.pvTexH = ph;
     uploadNadir();
     setFlat(false);
   }
@@ -1838,7 +2561,7 @@ function setFlat(on) {
   view.dirty = true;
 }
 $('#tFlat').addEventListener('click', () => setFlat($('#flat').hidden));
-$('#tMask').addEventListener('click', () => { view.showMask = !view.showMask; setPressed($('#tMask'), view.showMask); view.dirty = true; if (view.showMask) toast('Штриховка — места, которые не попали ни в один кадр и залиты по соседям.'); });
+$('#tMask').addEventListener('click', () => { view.showMask = !view.showMask; setPressed($('#tMask'), view.showMask); view.dirty = true; if (view.showMask) toast('Фиолетовая штриховка — дорисовано нейросетью, оранжевая — залито цветом. Кадров там не было.', 4500); });
 $('#tNadir').addEventListener('click', () => { view.showNadir = !view.showNadir; setPressed($('#tNadir'), view.showNadir); $('#nadirRow').hidden = !view.showNadir; if (view.showNadir) { view.lat = -70 * D2R; uploadNadir(); } view.dirty = true; });
 $('#nadirText').addEventListener('input', () => uploadNadir());
 $('#tGyro').addEventListener('click', async () => {
@@ -1859,21 +2582,146 @@ function renderStats(res) {
   if (s.pairs != null) {
     add('Кадров', `${s.frames} <small style="color:var(--vf-muted)">(${s.linked} связано)</small>`);
     add('Пар / совпадений', `${s.pairs} / ${s.matches}`);
-    add('Ошибка склейки', s.rms != null ? s.rms.toFixed(2) + ' px' : '—');
+    add('Ошибка склейки', s.rms != null ? (s.parallax ? `${s.rmsRot.toFixed(1)} → ${s.rms.toFixed(2)} px` : s.rms.toFixed(2) + ' px') : '—');
+    add('Параллакс', s.parallax ? 'компенсирован' : 'не нужен');
     add('Угол объектива', s.fovLong.toFixed(1) + '°');
     add('Фокус', `${Math.round(s.f)} px <small style="color:var(--vf-muted)">(было ${Math.round(s.f0)})</small>`);
   }
   add('Снято реально', (s.coverage * 100).toFixed(1) + '% сферы');
+  if (s.aiFilled) add('Дорисовал ИИ', (s.aiFilled * 100).toFixed(1) + '% · ' + s.aiTiles + ' тайл.');
+  else if (s.aiError) add('ИИ', 'не загрузился');
   add('Развёртка', `${res.W}×${res.H}`);
   if (s.ms) add('Время', (s.ms / 1000).toFixed(1) + ' с');
   $('#stats').innerHTML = rows.join('');
   let pill, txt;
-  if (s.rms == null) { pill = s.coverage > 0.99 ? 'good' : 'mid'; txt = s.coverage > 0.99 ? '<b>Полная сфера.</b>' : `<b>Потолок и пол залиты по соседним цветам</b> — панорама телефона их не снимает. Закройте надир табличкой или доснимите их.`; }
+  if (s.rms == null) { pill = s.coverage > 0.99 ? 'good' : 'mid'; txt = s.coverage > 0.99 ? '<b>Полная сфера.</b>' : s.aiFilled ? `<b>Края потолка и пола продолжила нейросеть</b>, дальше — плавная заливка: панорама телефона их не снимает. Закройте надир табличкой или снимите сферу по точкам.` : `<b>Потолок и пол залиты по соседним цветам</b> — панорама телефона их не снимает. Закройте надир табличкой или доснимите их.`; }
+  else if (s.rms < 1.2 && s.parallax) { pill = 'good'; txt = `<b>Отличная склейка.</b> Телефон двигался — склейка учла параллакс и глубину сцены${s.aiFilled ? ', пустоты дорисовала нейросеть' : ''}. Если где-то осталось двоение, закрасьте его ИИ-кистью.`; }
   else if (s.rms < 1.2 && s.coverage > 0.97) { pill = 'good'; txt = '<b>Отличная склейка.</b> Швы в пределах пикселя.'; }
+  else if (s.rms < 1.2) { pill = 'good'; txt = `<b>Отличная склейка.</b> ${s.aiFilled ? 'Неснятые места дорисовала нейросеть (штриховка в «Дорисованном»).' : 'Неснятые места залиты по соседям.'}`; }
   else if (s.rms < 2.5) { pill = 'mid'; txt = s.coverage < 0.97 ? `<b>Хорошая склейка</b>, но ${(100 - s.coverage * 100).toFixed(0)}% сферы не снято — эти места залиты.` : '<b>Хорошая склейка.</b> На близких предметах возможны лёгкие сдвиги.'; }
   else { pill = 'poor'; txt = '<b>Заметные расхождения.</b> Скорее всего, телефон смещался. Вращайте его вокруг объектива и держите на месте.'; }
   $('#verdict').innerHTML = `<span class="pill ${pill}">${pill === 'good' ? 'ОТЛИЧНО' : pill === 'mid' ? 'ХОРОШО' : 'ПЕРЕСНЯТЬ'}</span><span>${txt}</span>`;
 }
+
+// ───────────── ИИ-кисть: исправление искажений нейросетью ─────────────
+const brush = { on: false, ctx: null, dpr: 1, painting: false, last: null, undo: [], busy: false };
+let aiWorker = null;
+function aiInpaint(img, mask, S) {
+  return new Promise((resolve, reject) => {
+    if (!aiWorker) aiWorker = new Worker(URL.createObjectURL(new Blob([coreSrc + WORKER_GLUE], { type: 'text/javascript' })));
+    aiWorker.onmessage = e => { const m = e.data; if (m.type === 'done') resolve(m.out); else if (m.type === 'error') reject(new Error(m.message)); };
+    aiWorker.onerror = e => { aiWorker = null; reject(new Error(e.message || 'сбой нейросети')); };
+    aiWorker.postMessage({ type: 'inpaint', base: BASE, img, mask, S }, [img.buffer]);
+  });
+}
+function sizeBrush() {
+  const cv = $('#brushCv'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  brush.ctx = cv.getContext('2d', { willReadFrequently: true }); brush.dpr = dpr;
+}
+function clearBrush() { if (brush.ctx) brush.ctx.clearRect(0, 0, brush.ctx.canvas.width, brush.ctx.canvas.height); }
+function setBrush(on) {
+  brush.on = on; setPressed($('#tBrush'), on); $('#brushBar').hidden = !on; $('#brushCv').hidden = !on;
+  if (on) {
+    if (!$('#flat').hidden) setFlat(false);
+    if (view.gyro) { view.gyro = false; setPressed($('#tGyro'), false); }
+    sizeBrush(); clearBrush();
+    $('#brushCv').style.opacity = '0.55';
+  }
+}
+$('#tBrush').addEventListener('click', () => setBrush(!brush.on));
+$('#bClear').addEventListener('click', clearBrush);
+window.addEventListener('resize', () => { if (brush.on) { sizeBrush(); clearBrush(); } });
+(function brushInput() {
+  const cv = $('#brushCv');
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * brush.dpr, (e.clientY - r.top) * brush.dpr]; };
+  const stroke = (a, b) => { const x = brush.ctx; x.strokeStyle = '#9b7bff'; x.fillStyle = '#9b7bff'; x.lineCap = 'round'; x.lineJoin = 'round'; x.lineWidth = +$('#brushSize').value * brush.dpr; x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.stroke(); };
+  cv.addEventListener('pointerdown', e => { if (brush.busy) return; cv.setPointerCapture(e.pointerId); brush.painting = true; brush.last = pos(e); stroke(brush.last, brush.last); });
+  cv.addEventListener('pointermove', e => { if (!brush.painting) return; const p = pos(e); stroke(brush.last, p); brush.last = p; });
+  const end = () => { brush.painting = false; };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+})();
+// пересчёт полосы превью и маски после правки полной развёртки
+function refreshRows(v0, v1) {
+  const r = view.res, gl = view.gl, W = r.W, H = r.H;
+  const PW = r.pw, PH = r.ph, s = W / PW, py0 = Math.max(0, Math.floor(v0 / s)), py1 = Math.min(PH - 1, Math.ceil((v1 + 1) / s));
+  const pv = r.preview;
+  for (let y = py0; y <= py1; y++) for (let x = 0; x < PW; x++) {
+    let a = 0, b = 0, c = 0, n = 0;
+    const ya = Math.floor(y * s), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * s))), xa = Math.floor(x * s), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * s)));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const d = (yy * W + xx) * 4; a += r.rgba[d]; b += r.rgba[d + 1]; c += r.rgba[d + 2]; n++; }
+    const o = (y * PW + x) * 4; pv[o] = a / n; pv[o + 1] = b / n; pv[o + 2] = c / n; pv[o + 3] = 255;
+  }
+  const MW = r.mw, MH = MW / 2, sm = W / MW, my0 = Math.max(0, Math.floor(v0 / sm)), my1 = Math.min(MH - 1, Math.ceil((v1 + 1) / sm));
+  for (let y = my0; y <= my1; y++) for (let x = 0; x < MW; x++) {
+    let real = 0, ai = 0, n = 0;
+    const ya = Math.floor(y * sm), yb = Math.min(H, Math.max(ya + 1, Math.floor((y + 1) * sm))), xa = Math.floor(x * sm), xb = Math.min(W, Math.max(xa + 1, Math.floor((x + 1) * sm)));
+    for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) { const v = r.covered[yy * W + xx]; if (v === 1) real++; else if (v >= 2) ai++; n++; }
+    r.mask[(y * MW + x) * 2] = Math.round(255 * (n - real) / n); r.mask[(y * MW + x) * 2 + 1] = Math.round(255 * ai / n);
+  }
+  if (gl && view.pvTexW === PW) {
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, view.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, py0, PW, py1 - py0 + 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pv.buffer, py0 * PW * 4, (py1 - py0 + 1) * PW * 4));
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, view.mtex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, my0, MW, my1 - my0 + 1, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, new Uint8Array(r.mask.buffer, my0 * MW * 2, (my1 - my0 + 1) * MW * 2));
+  }
+  view.dirty = true;
+}
+function rowsOf(idx) { let a = Infinity, b = -1; const W = view.res.W; for (const i of idx) { const v = (i / W) | 0; if (v < a) a = v; if (v > b) b = v; } return [a, b]; }
+$('#bApply').addEventListener('click', async () => {
+  const r = view.res; if (!r || brush.busy) return;
+  const cv = $('#brushCv'), w = cv.width, h = cv.height, data = brush.ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (data[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) { toast('Сначала закрасьте место, которое нужно исправить.'); return; }
+  const R = Core.c2wLookAt(view.lon, view.lat), th = Math.tan(view.fov * D2R / 2);
+  const toDir = (px, py) => { const vx = (px - w / 2) / (h / 2) * th, vy = (py - h / 2) / (h / 2) * th, n = Math.hypot(vx, vy, 1); return [(R[0] * vx + R[1] * vy + R[2]) / n, (R[3] * vx + R[4] * vy + R[5]) / n, (R[6] * vx + R[7] * vy + R[8]) / n]; };
+  const cd = toDir((x0 + x1) / 2, (y0 + y1) / 2);
+  let ang = 0; for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [x0, (y0 + y1) / 2], [x1, (y0 + y1) / 2], [(x0 + x1) / 2, y0], [(x0 + x1) / 2, y1]]) { const d = toDir(px, py); ang = Math.max(ang, Math.acos(Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2]))); }
+  const S = 768, native = S / (r.W / (2 * Math.PI));
+  const fov = Math.max(12 * D2R, Math.min(110 * D2R, Math.max(2.6 * ang + 0.06, native)));
+  const ll = Core.lonLatFromDir(cd), Ct = Core.c2wLookAt(ll[0], ll[1]);
+  const img = Core.renderPerspective(r.rgba, r.W, r.H, Ct, fov, S);
+  // маска из мазков: каждый пиксель тайла проецируем на экран просмотра
+  const hole = new Uint8Array(S * S), tt = Math.tan(fov / 2), cc = (S - 1) / 2; let nh = 0;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const vx = (x - cc) / cc * tt, vy = (y - cc) / cc * tt, n = Math.hypot(vx, vy, 1);
+    const d0 = (Ct[0] * vx + Ct[1] * vy + Ct[2]) / n, d1 = (Ct[3] * vx + Ct[4] * vy + Ct[5]) / n, d2 = (Ct[6] * vx + Ct[7] * vy + Ct[8]) / n;
+    const c0 = R[0] * d0 + R[3] * d1 + R[6] * d2, c1 = R[1] * d0 + R[4] * d1 + R[7] * d2, c2 = R[2] * d0 + R[5] * d1 + R[8] * d2;
+    if (c2 <= 0.01) continue;
+    const sx = Math.round(w / 2 + c0 / c2 / th * (h / 2)), sy = Math.round(h / 2 + c1 / c2 / th * (h / 2));
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+    if (data[(sy * w + sx) * 4 + 3] > 40) { hole[y * S + x] = 1; nh++; }
+  }
+  if (nh < 20) { toast('Мазок слишком маленький — закрасьте чуть шире.'); return; }
+  // маска для модели (с запасом 3 px) и мягкая альфа для вклейки
+  const mask = new Uint8Array(S * S).fill(255), alpha = new Float32Array(S * S), D = 3;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (hole[y * S + x]) for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) mask[yy * S + xx] = 0; }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (mask[y * S + x]) continue;
+    let k = 0, n = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; n++; } }
+    alpha[y * S + x] = Math.min(1, 1.6 * k / n);
+  }
+  brush.busy = true; $('#aiBusy').hidden = false; $('#aiBusyTxt').textContent = aiWorker ? 'Нейросеть дорисовывает…' : 'Загружаю нейросеть (≈40 МБ, один раз)…';
+  try {
+    const t0 = performance.now();
+    const out = await aiInpaint(img, mask, S);
+    const undo = Core.applyInpaintTile(r.rgba, r.covered, r.W, r.H, Ct, fov, S, out, alpha);
+    brush.undo.push(undo); $('#bUndo').disabled = false;
+    const [a, b] = rowsOf(undo.idx); if (b >= 0) refreshRows(a, b);
+    clearBrush();
+    $('#brushHint').textContent = `Готово за ${((performance.now() - t0) / 1000).toFixed(1)} с. Можно закрасить следующее место или отменить.`;
+  } catch (e) { toast('Нейросеть не сработала: ' + e.message, 5000); }
+  finally { brush.busy = false; $('#aiBusy').hidden = true; }
+});
+$('#bUndo').addEventListener('click', () => {
+  const r = view.res, u = brush.undo.pop(); if (!r || !u) return;
+  for (let k = 0; k < u.idx.length; k++) { const o = u.idx[k] * 4; r.rgba[o] = u.px[k * 3]; r.rgba[o + 1] = u.px[k * 3 + 1]; r.rgba[o + 2] = u.px[k * 3 + 2]; r.covered[u.idx[k]] = u.cov[k]; }
+  const [a, b] = rowsOf(u.idx); if (b >= 0) refreshRows(a, b);
+  $('#bUndo').disabled = !brush.undo.length;
+});
 
 // ───────────── экспорт JPEG с GPano ─────────────
 function xmpGPano(W, H) {
