@@ -1348,6 +1348,8 @@ function forEachErpInView(W, H, C2W, fov, size, cb) {
 }
 
 // ───────────────────────── ИИ-дорисовка пустот ─────────────────────────
+// Размер квадратного тайла с полем зрения fov, при котором его пиксель равен пикселю сферы шириной W.
+function nativeTile(fov, W) { return Math.max(512, Math.min(2048, Math.round(2 * Math.tan(fov / 2) * W / (2 * Math.PI) / 8) * 8)); }
 // covered: 0 — нет снимка, 1 — реальный кадр, 2 — дорисовано ИИ. run(tileRGBA, mask(0 — дорисовать), S) → Promise<RGBA S×S>.
 // Мелкие пустоты — отдельным тайлом по их центру; большие (потолок/пол) — гранями куба, сначала те, где больше контекста.
 async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
@@ -1415,11 +1417,10 @@ async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
     }
   }
   tiles.sort((a, b) => a.area - b.area);
-  const S = opts.tile || 768;
   let filled = 0;
   const elig = (u, v) => eligible[Math.min(LH - 1, (v * LH / H) | 0) * LW + Math.min(LW - 1, (u * LW / W) | 0)];
   for (let t = 0; t < tiles.length; t++) {
-    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat);
+    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat), S = opts.tile || nativeTile(T.fov, W);
     const img = renderPerspective(rgba, W, H, C2W, T.fov, S);
     // маска: 0 там, где на сфере пусто (с расширением на 2 px); недоступное ИИ — тоже маскируем, но не записываем
     const raw = new Uint8Array(S * S), tt = Math.tan(T.fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
@@ -1451,12 +1452,11 @@ async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
 }
 // ИИ лечит швы: кластеры ячеек, где соседние кадры заметно расходятся, перерисовываются нейросетью.
 // Кластер — связная область рискованных ячеек (с расширением); тайл с запасом контекста, вклейка с мягким краем.
-async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
+function aiSeamClusters(seams, opts) {
   opts = opts || {};
-  const { LW, LH, risk } = seams, thr = opts.thr || 1.0, maxTiles = opts.maxTiles || 10;
+  const { LW, LH, risk } = seams, thr = opts.thr || 1.3;
   const hot = new Uint8Array(LW * LH);
   for (let k = 0; k < LW * LH; k++) if (risk[k] > thr) hot[k] = 1;
-  // расширяем на 1 ячейку, чтобы захватить края дефекта
   const dil = new Uint8Array(LW * LH);
   for (let k = 0; k < LW * LH; k++) if (hot[k]) { const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy >= 0 && yy < LH) dil[yy * LW + (x + dx + LW) % LW] = 1; } }
   const comp = new Int32Array(LW * LH).fill(-1), comps = [];
@@ -1464,20 +1464,25 @@ async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
     if (!dil[k0] || comp[k0] >= 0) continue;
     const id = comps.length, st = [k0], cells = []; comp[k0] = id; let mass = 0;
     while (st.length) { const k = st.pop(); cells.push(k); mass += hot[k] ? risk[k] : 0; const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy < 0 || yy >= LH) continue; const kk = yy * LW + (x + dx + LW) % LW; if (dil[kk] && comp[kk] < 0) { comp[kk] = id; st.push(kk); } } }
-    comps.push({ cells, mass, id });
+    if (cells.length <= 400) comps.push({ cells, mass, id });
   }
   comps.sort((a, b) => b.mass - a.mass);
+  return comps.filter(c => c.mass >= (opts.minMass || 6));
+}
+async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
+  opts = opts || {};
+  const { LW, LH } = seams, maxTiles = opts.maxTiles || 8;
   const cellDir = k => { const y = (k / LW) | 0, x = k - y * LW; return dirFromLonLat((x + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / LH * Math.PI); };
-  const S = opts.tile || 768, native = S / (W / (2 * Math.PI));
   let done = 0, tiles = 0;
-  const todo = comps.filter(c => c.mass >= (opts.minMass || 4)).slice(0, maxTiles);
+  const undos = [];
+  const todo = aiSeamClusters(seams, opts).slice(0, maxTiles);
   for (const c of todo) {
     let sx = 0, sy = 0, sz = 0; for (const k of c.cells) { const d = cellDir(k); sx += d[0]; sy += d[1]; sz += d[2]; }
     const n = Math.hypot(sx, sy, sz); if (n < 1e-6) continue; const cd = [sx / n, sy / n, sz / n];
     let rad = 0; for (const k of c.cells) { const d = cellDir(k); rad = Math.max(rad, Math.acos(Math.max(-1, Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2])))); }
     rad += Math.PI / LH;
-    if (rad > 35 * Math.PI / 180) continue; // слишком большой — не трогаем (лучше кистью)
-    const fov = Math.max(native, Math.min(100 * Math.PI / 180, 3 * rad + 0.1)), ll = lonLatFromDir(cd), C2W = c2wLookAt(ll[0], ll[1]);
+    if (rad > 12 * Math.PI / 180) continue; // крупное расхождение — не трогаем автоматически (лучше кистью)
+    const fov = Math.min(100 * Math.PI / 180, Math.max(18 * Math.PI / 180, 3 * rad + 0.1)), ll = lonLatFromDir(cd), C2W = c2wLookAt(ll[0], ll[1]), S = opts.tile || nativeTile(fov, W);
     const img = renderPerspective(rgba, W, H, C2W, fov, S);
     const set = new Set(c.cells), mask = new Uint8Array(S * S).fill(255), tt = Math.tan(fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
     let nh = 0;
@@ -1491,15 +1496,16 @@ async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
     if (nh < 30) continue;
     const alpha = new Float32Array(S * S);
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      let k = 0, m = 0; for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; m++; } }
-      alpha[y * S + x] = Math.min(1, 1.4 * k / m);
+      if (!mask[y * S + x]) { alpha[y * S + x] = 1; continue; }
+      let k = 0, m = 0; for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; m++; } }
+      alpha[y * S + x] = 0.8 * k / m;
     }
     const out = await run(img, mask, S);
     const u = applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha);
-    done += u.idx.length; tiles++;
+    done += u.idx.length; tiles++; undos.push(u);
     if (report) report(tiles / todo.length);
   }
-  return { pixels: done, tiles };
+  return { pixels: done, tiles, undos };
 }
 
 // Исправление кистью: тайл C2W/fov размером S, маска (0 — перерисовать) уже готова; out — ответ модели.
@@ -1766,6 +1772,6 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
+  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };

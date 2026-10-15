@@ -233,6 +233,7 @@ footer.note { text-align: left; }
           </div>
           <span class="note">«Авто» подбирает ширину по фокусному расстоянию камеры, чтобы не растягивать пиксели.</span>
         </div>
+        <label class="check"><input type="checkbox" id="optPar" checked><span>Учитывать съёмку с рук<small>Параллакс и швы в обход предметов. Если результат хуже, выключите — склейка будет как в первой версии.</small></span></label>
         <label class="check"><input type="checkbox" id="optAI" checked><span>ИИ-дорисовка пустот<small>Нейросеть MI-GAN работает прямо в телефоне. При первом запуске скачивается около 40 МБ, потом берётся из кэша.</small></span></label>
         <label class="check"><input type="checkbox" id="optLock" checked><span>Фиксировать экспозицию и баланс белого<small>Если камера разрешает. Иначе яркость выровняется при склейке.</small></span></label>
         <label class="check"><input type="checkbox" id="optVibe" checked><span>Вибрация при снимке<small>Только Android.</small></span></label>
@@ -309,8 +310,10 @@ footer.note { text-align: left; }
       <button class="tool" id="tGyro" aria-pressed="false">Гироскоп</button>
       <button class="tool" id="tFlat" aria-pressed="false">Развёртка</button>
       <button class="tool" id="tBrush" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-9 9H5v-6z"/><path d="M12 6l6 6"/></svg>ИИ-кисть</button>
+      <button class="tool" id="tHeal" hidden>ИИ: швы</button>
       <button class="tool" id="tMask" aria-pressed="false">Дорисованное</button>
       <button class="tool" id="tNadir" aria-pressed="false">Табличка на полу</button>
+      <button class="tool" id="tFrames" hidden>Кадры (zip)</button>
       <button class="tool" id="tAgain">Снять заново</button>
     </div>
     <div class="brush-bar" id="brushBar" hidden>
@@ -1680,6 +1683,8 @@ function forEachErpInView(W, H, C2W, fov, size, cb) {
 }
 
 // ───────────────────────── ИИ-дорисовка пустот ─────────────────────────
+// Размер квадратного тайла с полем зрения fov, при котором его пиксель равен пикселю сферы шириной W.
+function nativeTile(fov, W) { return Math.max(512, Math.min(2048, Math.round(2 * Math.tan(fov / 2) * W / (2 * Math.PI) / 8) * 8)); }
 // covered: 0 — нет снимка, 1 — реальный кадр, 2 — дорисовано ИИ. run(tileRGBA, mask(0 — дорисовать), S) → Promise<RGBA S×S>.
 // Мелкие пустоты — отдельным тайлом по их центру; большие (потолок/пол) — гранями куба, сначала те, где больше контекста.
 async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
@@ -1747,11 +1752,10 @@ async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
     }
   }
   tiles.sort((a, b) => a.area - b.area);
-  const S = opts.tile || 768;
   let filled = 0;
   const elig = (u, v) => eligible[Math.min(LH - 1, (v * LH / H) | 0) * LW + Math.min(LW - 1, (u * LW / W) | 0)];
   for (let t = 0; t < tiles.length; t++) {
-    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat);
+    const T = tiles[t], C2W = c2wLookAt(T.lon, T.lat), S = opts.tile || nativeTile(T.fov, W);
     const img = renderPerspective(rgba, W, H, C2W, T.fov, S);
     // маска: 0 там, где на сфере пусто (с расширением на 2 px); недоступное ИИ — тоже маскируем, но не записываем
     const raw = new Uint8Array(S * S), tt = Math.tan(T.fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
@@ -1783,12 +1787,11 @@ async function aiFillHoles(rgba, covered, W, H, run, report, opts) {
 }
 // ИИ лечит швы: кластеры ячеек, где соседние кадры заметно расходятся, перерисовываются нейросетью.
 // Кластер — связная область рискованных ячеек (с расширением); тайл с запасом контекста, вклейка с мягким краем.
-async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
+function aiSeamClusters(seams, opts) {
   opts = opts || {};
-  const { LW, LH, risk } = seams, thr = opts.thr || 1.0, maxTiles = opts.maxTiles || 10;
+  const { LW, LH, risk } = seams, thr = opts.thr || 1.3;
   const hot = new Uint8Array(LW * LH);
   for (let k = 0; k < LW * LH; k++) if (risk[k] > thr) hot[k] = 1;
-  // расширяем на 1 ячейку, чтобы захватить края дефекта
   const dil = new Uint8Array(LW * LH);
   for (let k = 0; k < LW * LH; k++) if (hot[k]) { const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy >= 0 && yy < LH) dil[yy * LW + (x + dx + LW) % LW] = 1; } }
   const comp = new Int32Array(LW * LH).fill(-1), comps = [];
@@ -1796,20 +1799,25 @@ async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
     if (!dil[k0] || comp[k0] >= 0) continue;
     const id = comps.length, st = [k0], cells = []; comp[k0] = id; let mass = 0;
     while (st.length) { const k = st.pop(); cells.push(k); mass += hot[k] ? risk[k] : 0; const y = (k / LW) | 0, x = k - y * LW; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy; if (yy < 0 || yy >= LH) continue; const kk = yy * LW + (x + dx + LW) % LW; if (dil[kk] && comp[kk] < 0) { comp[kk] = id; st.push(kk); } } }
-    comps.push({ cells, mass, id });
+    if (cells.length <= 400) comps.push({ cells, mass, id });
   }
   comps.sort((a, b) => b.mass - a.mass);
+  return comps.filter(c => c.mass >= (opts.minMass || 6));
+}
+async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
+  opts = opts || {};
+  const { LW, LH } = seams, maxTiles = opts.maxTiles || 8;
   const cellDir = k => { const y = (k / LW) | 0, x = k - y * LW; return dirFromLonLat((x + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (y + 0.5) / LH * Math.PI); };
-  const S = opts.tile || 768, native = S / (W / (2 * Math.PI));
   let done = 0, tiles = 0;
-  const todo = comps.filter(c => c.mass >= (opts.minMass || 4)).slice(0, maxTiles);
+  const undos = [];
+  const todo = aiSeamClusters(seams, opts).slice(0, maxTiles);
   for (const c of todo) {
     let sx = 0, sy = 0, sz = 0; for (const k of c.cells) { const d = cellDir(k); sx += d[0]; sy += d[1]; sz += d[2]; }
     const n = Math.hypot(sx, sy, sz); if (n < 1e-6) continue; const cd = [sx / n, sy / n, sz / n];
     let rad = 0; for (const k of c.cells) { const d = cellDir(k); rad = Math.max(rad, Math.acos(Math.max(-1, Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2])))); }
     rad += Math.PI / LH;
-    if (rad > 35 * Math.PI / 180) continue; // слишком большой — не трогаем (лучше кистью)
-    const fov = Math.max(native, Math.min(100 * Math.PI / 180, 3 * rad + 0.1)), ll = lonLatFromDir(cd), C2W = c2wLookAt(ll[0], ll[1]);
+    if (rad > 12 * Math.PI / 180) continue; // крупное расхождение — не трогаем автоматически (лучше кистью)
+    const fov = Math.min(100 * Math.PI / 180, Math.max(18 * Math.PI / 180, 3 * rad + 0.1)), ll = lonLatFromDir(cd), C2W = c2wLookAt(ll[0], ll[1]), S = opts.tile || nativeTile(fov, W);
     const img = renderPerspective(rgba, W, H, C2W, fov, S);
     const set = new Set(c.cells), mask = new Uint8Array(S * S).fill(255), tt = Math.tan(fov / 2), cc = (S - 1) / 2, d = [0, 0, 0];
     let nh = 0;
@@ -1823,15 +1831,16 @@ async function aiHealSeams(rgba, covered, W, H, seams, run, report, opts) {
     if (nh < 30) continue;
     const alpha = new Float32Array(S * S);
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      let k = 0, m = 0; for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; m++; } }
-      alpha[y * S + x] = Math.min(1, 1.4 * k / m);
+      if (!mask[y * S + x]) { alpha[y * S + x] = 1; continue; }
+      let k = 0, m = 0; for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; m++; } }
+      alpha[y * S + x] = 0.8 * k / m;
     }
     const out = await run(img, mask, S);
     const u = applyInpaintTile(rgba, covered, W, H, C2W, fov, S, out, alpha);
-    done += u.idx.length; tiles++;
+    done += u.idx.length; tiles++; undos.push(u);
     if (report) report(tiles / todo.length);
   }
-  return { pixels: done, tiles };
+  return { pixels: done, tiles, undos };
 }
 
 // Исправление кистью: тайл C2W/fov размером S, маска (0 — перерисовать) уже готова; out — ответ модели.
@@ -2098,7 +2107,7 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
+  makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };
 </script>
@@ -2109,7 +2118,7 @@ const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup',
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
-const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile };'))();
+const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile, aiHealSeams, aiSeamClusters, nativeTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
 // просмотр в полном разрешении, если видеокарта держит такие текстуры
@@ -2180,7 +2189,7 @@ self.onmessage = async (e) => {
     }
     report({ stage: 'fill', frac: 0 });
     extra.flatFilled = fillHoles(res.rgba, res.covered, res.W, res.H) / (res.W * res.H);
-    if (m.opts.ai && res.seams && res.seams.risk) {
+    if (m.opts.ai && m.opts.heal && res.seams && res.seams.risk) {
       let hot = 0; for (const v of res.seams.risk) if (v > 1.0) hot++;
       if (hot > 0) {
         report({ stage: 'heal', frac: 0, note: 'загружаю нейросеть' });
@@ -2198,7 +2207,9 @@ self.onmessage = async (e) => {
     const MW = Math.min(res.W, 2048), mask = downscaleMask(res.covered, res.W, res.H, MW);
     const pvBuf = pv.rgba === res.rgba ? pv.rgba.slice() : pv.rgba;
     const stats = Object.assign(res.stats, extra);
-    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, covered: res.covered, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: MW, stats }, [res.rgba.buffer, res.covered.buffer, pvBuf.buffer, mask.buffer]);
+    const seams = res.seams && res.seams.risk ? { LW: res.seams.LW, LH: res.seams.LH, risk: res.seams.risk } : null;
+    const tr = [res.rgba.buffer, res.covered.buffer, pvBuf.buffer, mask.buffer]; if (seams) tr.push(seams.risk.buffer);
+    self.postMessage({ type: 'done', W: res.W, H: res.H, rgba: res.rgba, covered: res.covered, preview: pvBuf, pw: pv.w, ph: pv.h, mask, mw: MW, stats, seams }, tr);
   } catch (err) { self.postMessage({ type: 'error', message: String(err && err.message || err) }); }
 };`;
 let worker = null;
@@ -2218,6 +2229,7 @@ function runJob(msg, transfer) {
 }
 const BASE = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
 const aiOn = () => $('#optAI').checked;
+const parOpts = () => $('#optPar').checked ? {} : { parallax: false, seams: false };
 function outWidth() { const v = +document.querySelector('input[name=res]:checked').value; return v ? Math.min(v, MAXW) : 0; }
 
 // ───────────── экран обработки ─────────────
@@ -2527,14 +2539,15 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'heal', 'preview'];
+const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
   try {
+    lastFrames = frames;
     const { out, transfer } = await decodeFrames(frames);
     const f0 = 0.75 * Math.max(out[0].w, out[0].h);
-    const res = await runJob({ type: 'stitch', frames: out, opts: { f0, outW: outWidth(), maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE } }, transfer);
+    const res = await runJob({ type: 'stitch', frames: out, opts: Object.assign({ f0, outW: outWidth(), maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE }, parOpts()) }, transfer);
     lastSource = { kind: 'capture' };
     openResult(res);
   } catch (e) { show('home'); toast('Не получилось собрать: ' + e.message, 6000); }
@@ -2543,7 +2556,7 @@ let lastSource = null;
 $('#btnDemo').addEventListener('click', async () => {
   startProcess('Демо-зал', ['demo'].concat(STITCH_ORDER));
   $('#procSub').textContent = 'Имитирую съёмку с рук: телефон ходит по дуге вокруг тела, гироскоп дрейфует, мимо идёт человек, пол не снят. Склейка и нейросеть должны с этим справиться.';
-  try { const res = await runJob({ type: 'demo', seed: 7, opts: { outW: outWidth() || 4096, maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE } }); lastSource = { kind: 'demo' }; openResult(res); }
+  try { const res = await runJob({ type: 'demo', seed: 7, opts: Object.assign({ outW: outWidth() || 4096, maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE }, parOpts()) }); lastSource = { kind: 'demo' }; openResult(res); }
   catch (e) { show('home'); toast('Ошибка демо: ' + e.message, 6000); }
 });
 
@@ -2654,6 +2667,8 @@ function uploadNadir() {
 function openResult(res) {
   view.res = res; show('result');
   brush.undo = []; $('#bUndo').disabled = true; setBrush(false);
+  healUndo = null; updateHealButton();
+  $('#tFrames').hidden = !(lastSource && lastSource.kind === 'capture' && lastFrames);
   $('#brushHint').textContent = 'Закрасьте пальцем место с искажением — двоение, разрыв, человека — и нажмите «Дорисовать».';
   $('#resDims').textContent = `${res.W}×${res.H}`;
   if (!initGL()) { toast('WebGL недоступен — показываю развёртку.'); setFlat(true); }
@@ -2848,8 +2863,8 @@ $('#bApply').addEventListener('click', async () => {
   const toDir = (px, py) => { const vx = (px - w / 2) / (h / 2) * th, vy = (py - h / 2) / (h / 2) * th, n = Math.hypot(vx, vy, 1); return [(R[0] * vx + R[1] * vy + R[2]) / n, (R[3] * vx + R[4] * vy + R[5]) / n, (R[6] * vx + R[7] * vy + R[8]) / n]; };
   const cd = toDir((x0 + x1) / 2, (y0 + y1) / 2);
   let ang = 0; for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [x0, (y0 + y1) / 2], [x1, (y0 + y1) / 2], [(x0 + x1) / 2, y0], [(x0 + x1) / 2, y1]]) { const d = toDir(px, py); ang = Math.max(ang, Math.acos(Math.min(1, d[0] * cd[0] + d[1] * cd[1] + d[2] * cd[2]))); }
-  const S = 768, native = S / (r.W / (2 * Math.PI));
-  const fov = Math.max(12 * D2R, Math.min(110 * D2R, Math.max(2.6 * ang + 0.06, native)));
+  const fov = Math.max(8 * D2R, Math.min(110 * D2R, 2.6 * ang + 0.06));
+  const S = Core.nativeTile(fov, r.W);
   const ll = Core.lonLatFromDir(cd), Ct = Core.c2wLookAt(ll[0], ll[1]);
   const img = Core.renderPerspective(r.rgba, r.W, r.H, Ct, fov, S);
   // маска из мазков: каждый пиксель тайла проецируем на экран просмотра
@@ -2869,8 +2884,9 @@ $('#bApply').addEventListener('click', async () => {
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (hole[y * S + x]) for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) mask[yy * S + xx] = 0; }
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     if (mask[y * S + x]) continue;
+    // внутри мазка — 1, у края маски плавно спадает, за маской — 0
     let k = 0, n = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < S && xx < S) { k += mask[yy * S + xx] ? 0 : 1; n++; } }
-    alpha[y * S + x] = Math.min(1, 1.6 * k / n);
+    alpha[y * S + x] = k / n;
   }
   brush.busy = true; $('#aiBusy').hidden = false; $('#aiBusyTxt').textContent = aiWorker ? 'Нейросеть дорисовывает…' : 'Загружаю нейросеть (≈40 МБ, один раз)…';
   try {
@@ -2889,6 +2905,64 @@ $('#bUndo').addEventListener('click', () => {
   for (let k = 0; k < u.idx.length; k++) { const o = u.idx[k] * 4; r.rgba[o] = u.px[k * 3]; r.rgba[o + 1] = u.px[k * 3 + 1]; r.rgba[o + 2] = u.px[k * 3 + 2]; r.covered[u.idx[k]] = u.cov[k]; }
   const [a, b] = rowsOf(u.idx); if (b >= 0) refreshRows(a, b);
   $('#bUndo').disabled = !brush.undo.length;
+});
+
+// ───────────── ИИ: швы — по кнопке, с отменой ─────────────
+let healUndo = null;
+function updateHealButton() {
+  const r = view.res, b = $('#tHeal');
+  if (healUndo) { b.hidden = false; b.textContent = 'Отменить ИИ-швы'; return; }
+  const n = r && r.seams ? Math.min(8, Core.aiSeamClusters(r.seams).length) : 0;
+  b.hidden = !n; b.textContent = `ИИ: швы (${n})`;
+}
+$('#tHeal').addEventListener('click', async () => {
+  const r = view.res; if (!r || brush.busy) return;
+  if (healUndo) {
+    for (const u of healUndo.slice().reverse()) for (let k = 0; k < u.idx.length; k++) { const o = u.idx[k] * 4; r.rgba[o] = u.px[k * 3]; r.rgba[o + 1] = u.px[k * 3 + 1]; r.rgba[o + 2] = u.px[k * 3 + 2]; r.covered[u.idx[k]] = u.cov[k]; }
+    const all = [].concat(...healUndo.map(u => u.idx)); const [a, b] = rowsOf(all); if (b >= 0) refreshRows(a, b);
+    healUndo = null; updateHealButton(); toast('ИИ-правки швов отменены.'); return;
+  }
+  brush.busy = true; $('#aiBusy').hidden = false; $('#aiBusyTxt').textContent = aiWorker ? 'Нейросеть сводит швы…' : 'Загружаю нейросеть (≈40 МБ, один раз)…';
+  try {
+    const res = await Core.aiHealSeams(r.rgba, r.covered, r.W, r.H, r.seams, (img, mask, S) => aiInpaint(img, mask, S), fr => { $('#aiBusyTxt').textContent = `Нейросеть сводит швы… ${Math.round(fr * 100)}%`; }, {});
+    healUndo = res.undos;
+    const all = [].concat(...res.undos.map(u => u.idx)); const [a, b] = rowsOf(all); if (b >= 0) refreshRows(a, b);
+    toast(res.tiles ? `Сведено мест: ${res.tiles}. Посмотрите «Дорисованное»; если хуже — отмените.` : 'Подходящих мест не нашлось.', 4500);
+  } catch (e) { toast('Нейросеть не сработала: ' + e.message, 5000); }
+  finally { brush.busy = false; $('#aiBusy').hidden = true; updateHealButton(); }
+});
+
+// ───────────── исходные кадры (zip) — чтобы разобрать неудачную съёмку ─────────────
+let lastFrames = null;
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files) { // [{name, data: Uint8Array}] без сжатия
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const f of files) {
+    const nm = enc.encode(f.name), crc = crc32(f.data), h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(8, 0, true); h.setUint32(14, crc, true); h.setUint32(18, f.data.length, true); h.setUint32(22, f.data.length, true); h.setUint16(26, nm.length, true);
+    parts.push(new Uint8Array(h.buffer), nm, f.data);
+    const c = new DataView(new ArrayBuffer(46)); c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, f.data.length, true); c.setUint32(24, f.data.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), nm); off += 30 + nm.length + f.data.length;
+  }
+  const csz = central.reduce((a, b) => a + b.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csz, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+$('#tFrames').addEventListener('click', async () => {
+  if (!lastFrames) return;
+  const files = [], meta = { app: 'sfera360', ua: navigator.userAgent, frames: [] };
+  for (let i = 0; i < lastFrames.length; i++) {
+    const f = lastFrames[i], name = `frame_${String(i).padStart(2, '0')}.jpg`;
+    files.push({ name, data: new Uint8Array(await f.blob.arrayBuffer()) });
+    meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target });
+  }
+  if (view.res) meta.stats = view.res.stats;
+  files.push({ name: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta, null, 1)) });
+  const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = `sfera360-frames-${Date.now()}.zip`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  toast(`Архив кадров: ${(blob.size / 1048576).toFixed(1)} МБ. Пришлите его, чтобы разобрать склейку.`, 4500);
 });
 
 // ───────────── экспорт JPEG с GPano ─────────────
