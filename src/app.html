@@ -466,7 +466,7 @@ const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup',
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
-const Core = (new Function(coreSrc + '\nreturn { makePlan, measureParallax, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile, aiHealSeams, aiSeamClusters, nativeTile };'))();
+const Core = (new Function(coreSrc + '\nreturn { makePlan, measureParallax, logSO3, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile, aiHealSeams, aiSeamClusters, nativeTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
 // просмотр в полном разрешении, если видеокарта держит такие текстуры
@@ -591,6 +591,7 @@ const STAGES = {
   demo: 'Съёмка демо-зала (имитация телефона)',
   panos: 'Взаимное положение панорам',
   features: 'Опорные точки на кадрах',
+  rs: 'Поправка «бегущего затвора»',
   focal: 'Фокус камеры по перекрытиям',
   match1: 'Грубое совмещение, поправка гироскопа',
   ba1: 'Первая связка кадров',
@@ -1027,16 +1028,17 @@ function sweepGrab(slot) {
   if (c.width !== cap.fw || c.height !== cap.fh) { c.width = cap.fw; c.height = cap.fh; }
   c.getContext('2d').drawImage(v, 0, 0, cap.fw, cap.fh);
   const sh = sharpness(c);
-  if (!cap.cand) { cap.cand = { slot, canvas: c, sharp: sh, C2W: C, n: 1 }; return; }
+  const om = cap.omega ? cap.omega.slice() : null;
+  if (!cap.cand) { cap.cand = { slot, canvas: c, sharp: sh, C2W: C, omega: om, n: 1 }; return; }
   cap.cand.n++;
-  if (sh > cap.cand.sharp) { cap.scratch = cap.cand.canvas; Object.assign(cap.cand, { canvas: c, sharp: sh, C2W: C }); }
+  if (sh > cap.cand.sharp) { cap.scratch = cap.cand.canvas; Object.assign(cap.cand, { canvas: c, sharp: sh, C2W: C, omega: om }); }
   else cap.scratch = c;
 }
 function sweepCommit() {
   const cd = cap.cand; cap.cand = null; if (!cd) return;
   const t = cap.targets[cd.slot]; if (t.done) return;
   t.done = true; markCoverage(cd.C2W);
-  const fr = { blob: null, w: cap.fw, h: cap.fh, C2W: cd.C2W, target: cd.slot, plx: null, cam: cap.camInfo };
+  const fr = { blob: null, w: cap.fw, h: cap.fh, C2W: cd.C2W, omega: cd.omega, target: cd.slot, plx: null, cam: cap.camInfo };
   cap.frames.push(fr);
   cap.sweepBusy++;
   const canvas = cd.canvas;
@@ -1063,7 +1065,11 @@ function sweepLoop(now) {
   if (v.videoWidth && (v.videoWidth !== cap.vw || v.videoHeight !== cap.vh)) { cap.vw = v.videoWidth; cap.vh = v.videoHeight; }
   const s = Math.max(Wc / cap.vw, Hc / cap.vh); cap.disp = { s, ox: (Wc - cap.vw * s) / 2, oy: (Hc - cap.vh * s) / 2 };
   const C = currentC2W(); if (!C) return;
-  if (cap.prevC2W) { const dt = Math.max(1, now - cap.prevT) / 1000; const sp = Core.rotAngle(Core.m3mul(C, Core.m3T(cap.prevC2W))) / D2R / dt; cap.speed = cap.speed * 0.7 + sp * 0.3; }
+  if (cap.prevC2W) {
+    const dt = Math.max(1, now - cap.prevT) / 1000; const sp = Core.rotAngle(Core.m3mul(C, Core.m3T(cap.prevC2W))) / D2R / dt; cap.speed = cap.speed * 0.7 + sp * 0.3;
+    // угловая скорость в системе камеры (для поправки «бегущего затвора» при склейке)
+    if (dt < 0.2) { const w = Core.logSO3(Core.m3mul(Core.m3T(cap.prevC2W), C)); const o = cap.omega || [0, 0, 0]; cap.omega = [0, 1, 2].map(k => o[k] * 0.6 + w[k] / dt * 0.4); }
+  }
   cap.prevC2W = C; cap.prevT = now;
   const fwd = Core.camForward(C), p = [0, 0, 0, 0, 0], ll = Core.lonLatFromDir(fwd);
   const cxs = Wc / 2, cys = Hc / 2, hint = $('#capHint');
@@ -1234,13 +1240,13 @@ async function decodeFrames(frames) {
     c.width = f.w; c.height = f.h; x.drawImage(bmp, 0, 0, f.w, f.h); bmp.close && bmp.close();
     const d = x.getImageData(0, 0, f.w, f.h).data, rgb = new Uint8Array(f.w * f.h * 3);
     for (let p = 0, q = 0; p < d.length; p += 4, q += 3) { rgb[q] = d[p]; rgb[q + 1] = d[p + 1]; rgb[q + 2] = d[p + 2]; }
-    out.push({ w: f.w, h: f.h, rgb, C2W: f.C2W }); transfer.push(rgb.buffer);
+    out.push({ w: f.w, h: f.h, rgb, C2W: f.C2W, omega: f.omega || null }); transfer.push(rgb.buffer);
     onProgress({ stage: 'features', frac: 0.3 * (i + 1) / frames.length });
     await new Promise(r => setTimeout(r, 0));
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'focal', 'match1', 'ba1', 'match2', 'ba2', 'gains', 'seams', 'align', 'compose', 'ai', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'focal', 'match1', 'ba1', 'match2', 'ba2', 'rs', 'gains', 'seams', 'align', 'compose', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
@@ -1522,6 +1528,7 @@ function renderStats(res) {
     add('Пар / совпадений', `${s.pairs} / ${s.matches}`);
     add('Ошибка склейки', s.rms != null ? (s.parallax ? `${s.rmsRot.toFixed(1)} → ${s.rms.toFixed(2)} px` : s.rms.toFixed(2) + ' px') : '—');
     add('Параллакс', s.parallax ? 'компенсирован' : 'не нужен');
+    if (s.rsMs) add('Бегущий затвор', `исправлен · ${s.rsMs} мс`);
     add('Угол объектива', s.fovLong.toFixed(1) + '°');
     add('Фокус', `${Math.round(s.f)} px <small style="color:var(--vf-muted)">(было ${Math.round(s.f0)})</small>`);
   }
@@ -1711,7 +1718,7 @@ $('#tFrames').addEventListener('click', async () => {
   for (let i = 0; i < lastFrames.length; i++) {
     const f = lastFrames[i], name = `frame_${String(i).padStart(2, '0')}.jpg`;
     files.push({ name, data: new Uint8Array(await f.blob.arrayBuffer()) });
-    meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target, plx: f.plx });
+    meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target, plx: f.plx, omega: f.omega || null });
     if (!meta.cam && f.cam) meta.cam = f.cam;
   }
   if (view.res) meta.stats = view.res.stats;
