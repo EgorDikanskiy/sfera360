@@ -188,7 +188,8 @@ footer.note { text-align: left; }
 .ai-busy .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #9b7bff; border-right-color: transparent; animation: spin .8s linear infinite; }
 .nadir-row { display: flex; gap: 8px; align-items: center; }
 .nadir-row input[type=text] { flex: 1; min-width: 0; min-height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: #0f141a; color: var(--vf-ink); padding: 0 12px; font: inherit; font-size: 15px; }
-.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); transform: translateX(-50%); background: #1d252e; color: #eef1f4; border: 1px solid rgba(255,255,255,.14); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); transform: translateX(-50%); background: #1d252e; color: #eef1f4; border: 1px solid rgba(255,255,255,.14); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; pointer-events: none; }
+#capture:not([hidden]) ~ .toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 150px); } /* на съёмке не закрываем кнопку */
 
 /* ───── панорама с телефона ───── */
 #multiSetup { display: grid; grid-template-rows: auto 1fr auto; }
