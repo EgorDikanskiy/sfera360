@@ -99,6 +99,27 @@ footer.note { text-align: left; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
 .flash.on { opacity: .55; transition: none; }
 
+#ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: .38; mix-blend-mode: normal; }
+.plx { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 128px); width: min(86vw, 340px); background: var(--vf-glass); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 8px 12px 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: grid; gap: 6px; }
+.plx-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.plx-row b { margin-left: auto; font-size: 13px; }
+.plx-dot { width: 10px; height: 10px; border-radius: 50%; background: #9aa6b2; flex: none; }
+.plx.ok .plx-dot { background: var(--ok); } .plx.warn .plx-dot { background: var(--brass); } .plx.bad .plx-dot { background: var(--bad); }
+.plx-bar { position: relative; height: 6px; border-radius: 3px; background: linear-gradient(90deg, rgba(63,191,134,.35) 0 33%, rgba(242,181,68,.35) 33% 66%, rgba(217,87,63,.35) 66%); }
+.plx-bar i { position: absolute; top: -3px; width: 4px; height: 12px; border-radius: 2px; background: #fff; left: 0; transition: left .15s; }
+.plx-mark { position: absolute; top: 0; width: 1px; height: 6px; background: rgba(0,0,0,.5); }
+.coach { position: absolute; inset: 0; background: rgba(8,11,15,.82); display: grid; place-items: center; padding: calc(env(safe-area-inset-top, 0px) + 16px) max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; z-index: 5; }
+.coach-card { width: 100%; max-width: 420px; display: grid; gap: 14px; }
+.coach-card h3 { font: 700 20px/1.2 var(--f-display); margin: 0; }
+.coach-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.coach-steps li { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: start; }
+.coach-steps svg { width: 52px; height: 52px; color: var(--vf-ink); }
+.coach-steps b { display: block; font-size: 15px; }
+.coach-steps span { font-size: 14px; color: var(--vf-muted); }
+.coach-tip { margin: 0; font-size: 13px; color: var(--vf-muted); border-left: 2px solid var(--brass); padding-left: 10px; }
+.coach-check { font-size: 14px; }
+.coach .done-btn { justify-self: stretch; min-height: 50px; }
+
 /* ───── обработка ───── */
 #process { display: grid; place-items: center; padding-block: calc(env(safe-area-inset-top, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow-y: auto; }
@@ -204,7 +225,7 @@ footer.note { text-align: left; }
       <ul class="tips">
         <li>
           <svg viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="16" y="9" width="12" height="22" rx="2.5"/><circle cx="22" cy="14" r="1.6" fill="currentColor"/><path d="M10 36c4 3 20 3 24 0" stroke-dasharray="2 3"/><path d="M22 31v6"/></svg>
-          <div><b>Вращайте телефон вокруг объектива</b><span>Не вокруг себя. Объектив почти не сдвигается, двигается только направление. Иначе близкие витрины «поплывут» на швах.</span></div>
+          <div><b>Телефон — неподвижная ось</b><span>Не поворачивайтесь вместе с телефоном. Держите его в одной точке и переступайте ногами вокруг него. Вверх и вниз — наклоном у камеры, не рукой. Индикатор «Сдвиг» подскажет, если телефон уехал.</span></div>
         </li>
         <li>
           <svg viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="22" cy="22" r="11"/><circle cx="22" cy="22" r="3" fill="currentColor"/><path d="M22 5v6M22 33v6M5 22h6M33 22h6"/></svg>
@@ -233,7 +254,7 @@ footer.note { text-align: left; }
           </div>
           <span class="note">«Авто» подбирает ширину по фокусному расстоянию камеры, чтобы не растягивать пиксели.</span>
         </div>
-        <label class="check"><input type="checkbox" id="optPar" checked><span>Учитывать съёмку с рук<small>Параллакс и швы в обход предметов. Если результат хуже, выключите — склейка будет как в первой версии.</small></span></label>
+        <label class="check"><input type="checkbox" id="optPar" checked><span>Умные швы<small>Швы в обход предметов и подгонка кадров вдоль них. Выключите, если на результате видны резкие ступеньки.</small></span></label>
         <label class="check"><input type="checkbox" id="optAI" checked><span>ИИ-дорисовка пустот<small>Нейросеть MI-GAN работает прямо в телефоне. При первом запуске скачивается около 40 МБ, потом берётся из кэша.</small></span></label>
         <label class="check"><input type="checkbox" id="optLock" checked><span>Фиксировать экспозицию и баланс белого<small>Если камера разрешает. Иначе яркость выровняется при склейке.</small></span></label>
         <label class="check"><input type="checkbox" id="optVibe" checked><span>Вибрация при снимке<small>Только Android.</small></span></label>
@@ -247,6 +268,7 @@ footer.note { text-align: left; }
 <!-- ═════════ СЪЁМКА ═════════ -->
 <section id="capture" class="screen-dark" hidden>
   <video id="video" playsinline muted autoplay></video>
+  <canvas id="ghost"></canvas>
   <canvas id="overlay"></canvas>
   <div class="flash" id="flash"></div>
   <div class="hud-top">
@@ -257,6 +279,26 @@ footer.note { text-align: left; }
     <button class="icon-btn" id="capUndo" aria-label="Удалить последний кадр"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
   </div>
   <div class="hint" id="capHint" aria-live="polite">Наведите кружок в центре на ближайшую точку</div>
+  <div class="plx" id="plx" hidden>
+    <div class="plx-row"><span class="plx-dot" id="plxDot"></span><span id="plxTxt">Сдвиг телефона</span><b class="mono" id="plxVal">—</b></div>
+    <div class="plx-bar"><i id="plxBar"></i><span class="plx-mark" style="left:33%"></span><span class="plx-mark" style="left:66%"></span></div>
+  </div>
+  <div class="coach" id="coach" hidden>
+    <div class="coach-card">
+      <h3>Как снимать без двоения</h3>
+      <ol class="coach-steps">
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 5"/><rect x="27" y="22" width="10" height="20" rx="2" fill="currentColor"/><circle cx="32" cy="26" r="1.8" fill="#10151b"/><path d="M50 18l4 6-7 1" fill="none" stroke="#f2b544" stroke-width="2.5"/></svg>
+          <div><b>Телефон — неподвижная ось</b><span>Держите его двумя руками у лица. Поворачивайтесь, переступая ногами вокруг телефона: камера должна оставаться в одной точке пространства.</span></div></li>
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="26" y="14" width="12" height="24" rx="2" fill="currentColor" transform="rotate(-25 32 30)"/><circle cx="32" cy="30" r="3" fill="#f2b544"/><path d="M14 46h36" stroke="currentColor" stroke-width="2"/></svg>
+          <div><b>Вверх и вниз — наклоном у камеры</b><span>Для верхнего и нижнего ряда наклоняйте телефон, не опуская и не поднимая руки. Камера остаётся на месте, меняется только направление.</span></div></li>
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="12" y="16" width="30" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="20" y="22" width="30" height="24" rx="3" fill="none" stroke="#f2b544" stroke-width="2" stroke-dasharray="3 3"/></svg>
+          <div><b>Следите за «призраком»</b><span>Возле точки появится полупрозрачный прошлый кадр. Если ближние предметы двоятся, а дальние совпадают, телефон уехал: верните его назад. Полоска «Сдвиг» покажет, когда всё в порядке.</span></div></li>
+      </ol>
+      <p class="coach-tip">Идеально — штатив или монопод: камера телефона над осью вращения. В маленькой комнате это особенно важно.</p>
+      <label class="check coach-check"><input type="checkbox" id="coachHide"><span>Больше не показывать</span></label>
+      <button class="done-btn" id="coachOk">Понятно, снимаю</button>
+    </div>
+  </div>
   <div class="hud-bot">
     <canvas id="minimap" width="300" height="150" aria-label="Карта покрытия сферы"></canvas>
     <button class="shutter" id="capShutter" aria-label="Снять кадр вручную"><i></i></button>
@@ -2575,7 +2617,7 @@ const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup',
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
-const Core = (new Function(coreSrc + '\nreturn { makePlan, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile, aiHealSeams, aiSeamClusters, nativeTile };'))();
+const Core = (new Function(coreSrc + '\nreturn { makePlan, measureParallax, gyroToC2W, m3mul, m3T, rotZ, rotAngle, camForward, lonLatFromDir, dirFromLonLat, c2wLookAt, parseGPano, detectPeriod, renderPerspective, forEachErpInView, applyInpaintTile, aiHealSeams, aiSeamClusters, nativeTile };'))();
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MAXW = isIOS ? 5760 : 8192; // Safari ограничивает холст ~16.7 Мп
 // просмотр в полном разрешении, если видеокарта держит такие текстуры
@@ -2686,13 +2728,14 @@ function runJob(msg, transfer) {
 }
 const BASE = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
 const aiOn = () => $('#optAI').checked;
-const parOpts = () => $('#optPar').checked ? {} : { parallax: false, seams: false };
+const parOpts = () => $('#optPar').checked ? {} : { localAlign: false, seams: false };
 function outWidth() { const v = +document.querySelector('input[name=res]:checked').value; return v ? Math.min(v, MAXW) : 0; }
 
 // ───────────── экран обработки ─────────────
 const STAGES = {
   demo: 'Съёмка демо-зала (имитация телефона)',
   features: 'Опорные точки на кадрах',
+  focal: 'Фокус камеры по перекрытиям',
   match1: 'Грубое совмещение, поправка гироскопа',
   ba1: 'Первая связка кадров',
   match2: 'Точное совмещение',
@@ -2701,6 +2744,7 @@ const STAGES = {
   depth: 'Глубина сцены по эпиполярным линиям',
   gains: 'Выравнивание экспозиции',
   seams: 'Швы в обход предметов и прохожих',
+  align: 'Подгонка кадров вдоль швов',
   compose: 'Сшивка сферы',
   heal: 'ИИ лечит расхождения на швах',
   ai: 'ИИ дорисовывает пустоты',
@@ -2764,7 +2808,10 @@ function onProgress(m) {
 })();
 
 // ───────────── СЪЁМКА ─────────────
-const cap = { stream: null, track: null, vw: 0, vh: 0, f0: 0, plan: [], targets: [], frames: [], ori: null, oriT: 0, prevC2W: null, prevT: 0, speed: 99, hold: 0, busy: false, raf: 0, wake: null, cov: new Uint8Array(72 * 36), scale: 1, locked: false };
+const cap = { stream: null, track: null, vw: 0, vh: 0, f0: 0, plan: [], targets: [], frames: [], ori: null, oriT: 0, prevC2W: null, prevT: 0, speed: 99, hold: 0, busy: false, raf: 0, wake: null, cov: new Uint8Array(72 * 36), scale: 1, locked: false,
+  fRatio: 0.81, // фокус / длинная сторона кадра (у видеопотока iPhone ≈0,81; уточняется при склейке)
+  thumbs: [], plx: { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0 }, coach: false };
+const LW_ = 144, LH_ = 192; // размер миниатюр для индикатора и «призрака» (портрет)
 function screenAngle() { return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0); }
 function onOrient(e) { if (e.alpha == null && e.beta == null) return; cap.ori = { a: e.alpha, b: e.beta, g: e.gamma }; cap.oriT = performance.now(); }
 function currentC2W() { return cap.ori ? Core.gyroToC2W(cap.ori.a, cap.ori.b, cap.ori.g, screenAngle()) : null; }
@@ -2790,6 +2837,8 @@ $('#btnCapture').addEventListener('click', async () => {
   if (!cap.ori) { stopCapture(); show('home'); toast('Телефон не передаёт ориентацию (гироскоп). Откройте страницу на телефоне в Chrome или Safari.', 6000); return; }
   setupCapturePlan();
   try { cap.wake = await navigator.wakeLock.request('screen'); } catch (e) { }
+  let hideCoach = false; try { hideCoach = localStorage.getItem('sfera360.coach') === '1'; } catch (e) { }
+  cap.coach = !hideCoach; $('#coach').hidden = hideCoach;
   cap.raf = requestAnimationFrame(captureLoop);
 });
 
@@ -2799,12 +2848,18 @@ function setupCapturePlan() {
   const long = Math.max(cap.vw, cap.vh);
   cap.scale = long > 2048 ? 1920 / long : 1;
   const fw = Math.round(cap.vw * cap.scale), fh = Math.round(cap.vh * cap.scale);
-  cap.fw = fw; cap.fh = fh; cap.f0 = 0.75 * Math.max(fw, fh);
+  cap.fw = fw; cap.fh = fh; cap.f0 = cap.fRatio * Math.max(fw, fh);
   const hf = 2 * Math.atan(fw / 2 / cap.f0) / D2R, vf = 2 * Math.atan(fh / 2 / cap.f0) / D2R;
   cap.plan = Core.makePlan(hf, vf, 0.36);
   const C = currentC2W(), lon0 = Core.lonLatFromDir(Core.camForward(C))[0];
   cap.targets = cap.plan.map(t => ({ dir: Core.dirFromLonLat(lon0 + t.yaw * D2R, t.pitch * D2R), pole: !!t.pole, row: t.row, done: false }));
-  cap.frames = []; cap.cov.fill(0); cap.locked = false; cap.hold = 0;
+  cap.frames = []; cap.thumbs = []; cap.cov.fill(0); cap.locked = false; cap.hold = 0;
+  cap.plx = { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0 };
+  // миниатюры живого кадра (ориентация кадра: портрет/альбом — как у видео)
+  cap.lw = cap.fw <= cap.fh ? LW_ : LH_; cap.lh = cap.fw <= cap.fh ? LH_ : LW_;
+  cap.lcv = document.createElement('canvas'); cap.lcv.width = cap.lw; cap.lcv.height = cap.lh;
+  cap.lctx = cap.lcv.getContext('2d', { willReadFrequently: true });
+  cap.gcv = $('#ghost');
   updateCapHud();
 }
 function stopCapture() {
@@ -2815,8 +2870,9 @@ function stopCapture() {
   if (cap.wake) { cap.wake.release().catch(() => { }); cap.wake = null; }
 }
 $('#capClose').addEventListener('click', () => { stopCapture(); cap.frames = []; show('home'); });
+$('#coachOk').addEventListener('click', () => { cap.coach = false; $('#coach').hidden = true; if ($('#coachHide').checked) { try { localStorage.setItem('sfera360.coach', '1'); } catch (e) { } } });
 $('#capUndo').addEventListener('click', () => {
-  const f = cap.frames.pop(); if (!f) return;
+  const f = cap.frames.pop(); if (!f) return; cap.thumbs.pop();
   if (f.target >= 0) cap.targets[f.target].done = false;
   rebuildCoverage(); updateCapHud();
 });
@@ -2837,6 +2893,46 @@ function projectToScreen(C2W, d, out) {
   const x = f * c0 / Math.max(c2, 1e-3) + (cap.vw - 1) / 2, y = f * c1 / Math.max(c2, 1e-3) + (cap.vh - 1) / 2;
   const S = cap.disp; out[0] = S.ox + x * S.s; out[1] = S.oy + y * S.s; out[2] = c2; out[3] = c0; out[4] = c1;
   return out;
+}
+function liveThumb() {
+  const v = $('#video'); if (!v.videoWidth) return null;
+  cap.lctx.drawImage(v, 0, 0, cap.lw, cap.lh);
+  const d = cap.lctx.getImageData(0, 0, cap.lw, cap.lh).data, g = new Float32Array(cap.lw * cap.lh);
+  for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
+  return { w: cap.lw, h: cap.lh, g, rgba: d };
+}
+// ближайший снятый кадр с заметным перекрытием
+function refFrame(fwd) {
+  let bi = -1, ba = 50 * D2R;
+  cap.thumbs.forEach((t, i) => { const f = Core.camForward(t.C2W), a = Math.acos(Math.max(-1, Math.min(1, f[0] * fwd[0] + f[1] * fwd[1] + f[2] * fwd[2]))); if (a < ba && a > 6 * D2R) { ba = a; bi = i; } });
+  return bi;
+}
+function setPlx(val, state) {
+  const el = $('#plx'); el.hidden = state === 'none';
+  el.classList.toggle('ok', state === 'ok'); el.classList.toggle('warn', state === 'warn'); el.classList.toggle('bad', state === 'bad');
+  $('#plxVal').textContent = val == null ? '—' : val.toFixed(1) + '°';
+  $('#plxTxt').textContent = state === 'ok' ? 'Телефон на месте' : state === 'warn' ? 'Телефон немного сдвинут' : state === 'bad' ? 'Телефон уехал — верните назад' : state === 'unknown' ? 'Мало деталей для проверки' : 'Сдвиг телефона';
+  $('#plxBar').style.left = val == null ? '0%' : Math.min(97, val / 3 * 100) + '%';
+}
+// «призрак»: опорный кадр, перенесённый в текущий вид по гироскопу
+function drawGhost(C, refIdx) {
+  const gc = cap.gcv, Wc = gc.clientWidth, Hc = gc.clientHeight, dpr = 1;
+  if (gc.width !== Wc || gc.height !== Hc) { gc.width = Wc; gc.height = Hc; }
+  const g = gc.getContext('2d'); g.clearRect(0, 0, Wc, Hc);
+  if (refIdx < 0) return;
+  const t = cap.thumbs[refIdx], w = cap.lw, h = cap.lh, f = cap.fRatio * Math.max(w, h), cx = (w - 1) / 2, cy = (h - 1) / 2;
+  const R = Core.m3mul(Core.m3T(t.C2W), C);
+  if (!cap.gbuf) { cap.gbuf = document.createElement('canvas'); cap.gbuf.width = w; cap.gbuf.height = h; cap.gimg = cap.gbuf.getContext('2d').createImageData(w, h); }
+  const out = cap.gimg.data, src = t.rgba;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const vx = (x - cx) / f, vy = (y - cy) / f, X = R[0] * vx + R[1] * vy + R[2], Y = R[3] * vx + R[4] * vy + R[5], Z = R[6] * vx + R[7] * vy + R[8], o = (y * w + x) * 4;
+    if (Z <= 0.05) { out[o + 3] = 0; continue; }
+    const xr = Math.round(f * X / Z + cx), yr = Math.round(f * Y / Z + cy);
+    if (xr < 0 || yr < 0 || xr >= w || yr >= h) { out[o + 3] = 0; continue; }
+    const p = (yr * w + xr) * 4; out[o] = src[p]; out[o + 1] = src[p + 1]; out[o + 2] = src[p + 2]; out[o + 3] = 255;
+  }
+  cap.gbuf.getContext('2d').putImageData(cap.gimg, 0, 0);
+  const S = cap.disp; g.imageSmoothingEnabled = true; g.drawImage(cap.gbuf, S.ox, S.oy, cap.vw * S.s, cap.vh * S.s);
 }
 function captureLoop(now) {
   cap.raf = requestAnimationFrame(captureLoop);
@@ -2862,7 +2958,26 @@ function captureLoop(now) {
   const tol = best >= 0 && cap.targets[best].pole ? 6 : 4;
   const aligned = best >= 0 && bestAng / D2R < tol;
   const still = cap.speed < 7;
-  if (aligned && still && !cap.busy) cap.hold += 16; else cap.hold = Math.max(0, cap.hold - 40);
+  // сдвиг телефона: сравниваем живой кадр с ближайшим снятым (около точки съёмки)
+  const near = best >= 0 && bestAng / D2R < 14 && cap.thumbs.length > 0;
+  const ref = near ? refFrame(fwd) : -1;
+  if (ref >= 0 && now - cap.plx.t > 140 && !cap.busy) {
+    cap.plx.t = now;
+    const live = liveThumb();
+    if (live) {
+      const r = Core.measureParallax(live, cap.thumbs[ref], C, cap.thumbs[ref].C2W, cap.fRatio * Math.max(cap.lw, cap.lh), { r: 18, gx: 5, gy: 7, t: 6, minScore: 0.7 });
+      if (r.ok) { cap.plx.val = cap.plx.val == null || cap.plx.ref !== ref ? r.parallax : cap.plx.val * 0.5 + r.parallax * 0.5; cap.plx.n = r.n; }
+      else { cap.plx.val = null; cap.plx.n = r.n; }
+      cap.plx.ref = ref;
+      cap.plx.state = cap.plx.val == null ? 'unknown' : cap.plx.val < 1.0 ? 'ok' : cap.plx.val < 2.0 ? 'warn' : 'bad';
+    }
+  }
+  if (ref < 0) { cap.plx.state = 'none'; cap.plx.val = null; cap.plx.ref = -1; }
+  setPlx(cap.plx.val, cap.plx.state);
+  drawGhost(C, near ? ref : -1);
+  const plxBad = cap.plx.state === 'bad';
+  if (plxBad && !cap.plx.badSince) cap.plx.badSince = now; if (!plxBad) cap.plx.badSince = 0;
+  if (aligned && still && !cap.busy && !plxBad && !cap.coach) cap.hold += 16; else cap.hold = Math.max(0, cap.hold - 40);
   // цели
   cap.targets.forEach((t, i) => {
     projectToScreen(C, t.dir, p); if (p[2] < 0.2) return;
@@ -2894,6 +3009,7 @@ function captureLoop(now) {
   let txt;
   const doneN = cap.targets.filter(t => t.done).length;
   if (doneN === cap.targets.length) txt = 'Все точки сняты. Нажмите «Собрать сферу».';
+  else if (aligned && plxBad) txt = cap.plx.badSince && now - cap.plx.badSince > 4000 ? 'Не получается? Нажмите кнопку — сниму как есть' : 'Ближние предметы двоятся: верните телефон туда, где он был, и поворачивайте его вокруг камеры';
   else if (aligned && !still) txt = 'Замрите…';
   else if (aligned) txt = 'Держите…';
   else if (best >= 0 && cap.targets[best].pole) txt = cap.targets[best].dir[2] > 0 ? 'Поднимите телефон прямо вверх, на потолок' : 'Направьте телефон прямо вниз, на пол';
@@ -2963,7 +3079,15 @@ async function doCapture(targetIdx) {
       targetIdx = bi;
     }
     if (targetIdx >= 0) cap.targets[targetIdx].done = true;
-    cap.frames.push({ blob, w: cap.fw, h: cap.fh, C2W: pick.C2W, target: targetIdx });
+    cap.frames.push({ blob, w: cap.fw, h: cap.fh, C2W: pick.C2W, target: targetIdx, plx: cap.plx.val });
+    {
+      const c = document.createElement('canvas'); c.width = cap.lw; c.height = cap.lh; const x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(pick.canvas, 0, 0, cap.lw, cap.lh);
+      const d = x.getImageData(0, 0, cap.lw, cap.lh).data, g = new Float32Array(cap.lw * cap.lh);
+      for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
+      cap.thumbs.push({ w: cap.lw, h: cap.lh, g, rgba: d, C2W: pick.C2W });
+    }
+    cap.plx.val = null; cap.plx.state = 'none';
     markCoverage(pick.C2W); updateCapHud();
     if (cap.frames.length === 1 && $('#optLock').checked) lockExposure();
   } finally { cap.busy = false; }
@@ -2996,14 +3120,14 @@ async function decodeFrames(frames) {
   }
   return { out, transfer };
 }
-const STITCH_ORDER = ['features', 'match1', 'ba1', 'match2', 'ba2', 'parallax', 'depth', 'gains', 'seams', 'compose', 'ai', 'fill', 'preview'];
+const STITCH_ORDER = ['features', 'focal', 'match1', 'ba1', 'match2', 'ba2', 'gains', 'seams', 'align', 'compose', 'ai', 'fill', 'preview'];
 async function stitchCaptured(frames) {
   startProcess('Склеиваю сферу', STITCH_ORDER);
   $('#procSub').textContent = `${frames.length} кадров. Обычно 20–60 секунд, не закрывайте вкладку.`;
   try {
     lastFrames = frames;
     const { out, transfer } = await decodeFrames(frames);
-    const f0 = 0.75 * Math.max(out[0].w, out[0].h);
+    const f0 = cap.fRatio * Math.max(out[0].w, out[0].h);
     const res = await runJob({ type: 'stitch', frames: out, opts: Object.assign({ f0, outW: outWidth(), maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE }, parOpts()) }, transfer);
     lastSource = { kind: 'capture' };
     openResult(res);
@@ -3412,7 +3536,7 @@ $('#tFrames').addEventListener('click', async () => {
   for (let i = 0; i < lastFrames.length; i++) {
     const f = lastFrames[i], name = `frame_${String(i).padStart(2, '0')}.jpg`;
     files.push({ name, data: new Uint8Array(await f.blob.arrayBuffer()) });
-    meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target });
+    meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target, plx: f.plx });
   }
   if (view.res) meta.stats = view.res.stats;
   files.push({ name: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta, null, 1)) });
