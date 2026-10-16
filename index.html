@@ -123,6 +123,17 @@ footer.note { text-align: left; }
 .coach-check { font-size: 14px; }
 .coach .done-btn { justify-self: stretch; min-height: 50px; }
 
+/* ───── новый режим: проходы ───── */
+.newmode { display: grid; gap: 10px; border: 1px solid var(--line, rgba(127,127,127,.25)); border-radius: 14px; padding: 12px; }
+.newmode-h { font: 700 12px/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--brass); }
+.newmode .note { margin: 0; }
+.shutter.rec i { background: var(--bad); border-radius: 12px; transform: scale(.6); }
+.sweep-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sweep-choice button { min-height: 64px; border-radius: 14px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: var(--vf-ink); font: 600 15px/1.25 var(--f-body, inherit); padding: 8px; }
+.sweep-choice button b { display: block; font-size: 22px; font-family: var(--f-display); }
+.sweep-choice button.primary { background: var(--brass); color: #1b1404; border-color: transparent; }
+#capture.sweep .cap-tools, #capture.sweep .plx { display: none !important; }
+
 /* ───── обработка ───── */
 #process { display: grid; place-items: center; padding-block: calc(env(safe-area-inset-top, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow-y: auto; }
@@ -180,9 +191,19 @@ footer.note { text-align: left; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); transform: translateX(-50%); background: #1d252e; color: #eef1f4; border: 1px solid rgba(255,255,255,.14); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; }
 
 /* ───── панорама с телефона ───── */
-#panoSetup { display: grid; grid-template-rows: auto 1fr auto; }
-#panoSetup .top { padding: calc(env(safe-area-inset-top, 0px) + 12px) max(14px, env(safe-area-inset-right, 0px)) 8px max(14px, env(safe-area-inset-left, 0px)); display: flex; gap: 10px; align-items: center; }
-#panoSetup .top h2 { font: 700 17px/1.2 var(--f-display); margin: 0; }
+#multiSetup { display: grid; grid-template-rows: auto 1fr auto; }
+#multiSetup .top, #panoSetup .top { padding: calc(env(safe-area-inset-top, 0px) + 12px) max(14px, env(safe-area-inset-right, 0px)) 8px max(14px, env(safe-area-inset-left, 0px)); display: flex; gap: 10px; align-items: center; }
+#multiSetup .top h2, #panoSetup .top h2 { font: 700 17px/1.2 var(--f-display); margin: 0; }
+.multi-body { overflow-y: auto; padding: 4px max(14px, env(safe-area-inset-right, 0px)) 14px max(14px, env(safe-area-inset-left, 0px)); display: grid; gap: 12px; align-content: start; }
+.multi-how { border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+.multi-how summary { font-weight: 600; cursor: pointer; }
+.multi-how ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; color: var(--vf-muted); }
+.multi-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.multi-list li { display: grid; gap: 6px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 8px; }
+.multi-list canvas { width: 100%; height: auto; border-radius: 8px; display: block; background: #000; }
+.multi-list .row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.multi-list .row span { color: var(--vf-muted); flex: 1; min-width: 0; }
+.multi-list select { font: 600 14px/1.2 inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: #1c242d; color: var(--vf-ink); min-height: 40px; }
 #panoPrev { width: 100%; height: 100%; object-fit: contain; display: block; min-height: 0; background: #000; }
 .ctrls { padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(14px, env(safe-area-inset-left, 0px)); display: grid; gap: 14px; background: #141a21; }
 .ctrls label { display: grid; gap: 6px; font-size: 14px; }
@@ -215,6 +236,18 @@ footer.note { text-align: left; }
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg>
         Снять сферу
       </button>
+      <div class="newmode">
+        <span class="newmode-h">Новое: из панорам</span>
+        <div class="row2">
+          <button id="btnSweep" class="btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h18M3 12h18M3 16h18" stroke-dasharray="3 2"/><path d="M17 5l3 3-3 3"/></svg>
+            Снять проходами
+          </button>
+          <label class="btn" for="multiPanoFile" tabindex="0" id="lblMultiPano">Из 3–5 панорам iPhone</label>
+        </div>
+        <input id="multiPanoFile" type="file" accept="image/*" multiple hidden>
+        <p class="note">«Снять проходами» — как панорама iPhone, только 3 или 5 кругов: по горизонту, вверх, вниз (и потолок с полом). Кадры набираются сами, пока вы плавно поворачиваетесь. «Из панорам iPhone» склеивает в сферу несколько панорам, снятых в «Камере» с разным наклоном.</p>
+      </div>
       <div class="row2">
         <label class="btn" for="panoFile" tabindex="0" id="lblPano">Панорама из галереи</label>
         <button id="btnDemo" class="btn">Демо-зал</button>
@@ -290,6 +323,23 @@ footer.note { text-align: left; }
     <button class="chip tool-chip" id="capGhostBtn" type="button">Призрак: фото</button>
     <button class="chip tool-chip" id="capAutoBtn" type="button">Автоснимок: вкл</button>
   </div>
+  <div class="coach" id="sweepCoach" hidden>
+    <div class="coach-card">
+      <h3>Съёмка проходами</h3>
+      <ol class="coach-steps">
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M8 34h48" stroke="#f2b544" stroke-width="2.5" stroke-dasharray="5 4"/><circle cx="32" cy="34" r="9" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M46 22l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>
+          <div><b>Как панорама iPhone</b><span>Нажмите кнопку и плавно поворачивайтесь на месте, держа кружок на жёлтой линии. Кадры набираются сами, точки на линии зеленеют.</span></div></li>
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 20h44M10 32h44M10 44h44" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/><path d="M32 8v48" stroke="#f2b544" stroke-width="2"/></svg>
+          <div><b>Несколько кругов с разным наклоном</b><span>Первый — прямо, второй — телефон наклонён вверх примерно на 45°, третий — вниз. В режиме «5 проходов» ещё потолок и пол.</span></div></li>
+        <li><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 5"/><rect x="27" y="22" width="10" height="20" rx="2" fill="currentColor"/></svg>
+          <div><b>Медленно и вокруг телефона</b><span>Полный круг — секунд за 30. Телефон у лица, переступайте ногами вокруг него. Если слишком быстро, кадры не набираются — появится подсказка.</span></div></li>
+      </ol>
+      <div class="sweep-choice">
+        <button id="sweep3" class="primary"><b>3</b>прохода · быстрее</button>
+        <button id="sweep5"><b>5</b>проходов · точнее верх и низ</button>
+      </div>
+    </div>
+  </div>
   <div class="coach" id="coach" hidden>
     <div class="coach-card">
       <h3>Как снимать без двоения</h3>
@@ -336,6 +386,31 @@ footer.note { text-align: left; }
     <label for="panoA"><span>Горизонтальный охват <b class="mono" id="panoAv">360°</b></span><input type="range" id="panoA" min="60" max="400" step="1" value="360"></label>
     <label for="panoV"><span>Сдвиг горизонта <b class="mono" id="panoVv">0°</b></span><input type="range" id="panoV" min="-25" max="25" step="0.5" value="0"></label>
     <button class="done-btn" id="panoGo" style="justify-self:stretch">Собрать сферу</button>
+  </div>
+</section>
+
+<!-- ═════════ НЕСКОЛЬКО ПАНОРАМ ═════════ -->
+<section id="multiSetup" class="screen-dark" hidden>
+  <div class="top">
+    <button class="icon-btn" id="multiBack" aria-label="Назад"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <h2>Сфера из панорам</h2>
+  </div>
+  <div class="multi-body">
+    <details class="multi-how">
+      <summary>Как снять панорамы для сферы</summary>
+      <ol>
+        <li>В «Камере» включите «Панорама» и снимите обычную панораму, держа телефон прямо.</li>
+        <li>Снимите вторую с наклоном телефона вверх примерно на 45°: держите наклон постоянным и ведите по стрелке.</li>
+        <li>Третью — с наклоном вниз примерно на 45°.</li>
+        <li>iPhone снимает до ≈240°, поэтому для полного круга нужны две панорамы на каждый наклон, внахлёст (всего 6). С одной на наклон будет пустой сектор — его закрасит ИИ.</li>
+        <li>Стойте на одном месте, поворачивайтесь вокруг телефона, не меняйте зум.</li>
+      </ol>
+    </details>
+    <ol class="multi-list" id="multiList"></ol>
+    <p class="note" id="multiNote">Наклон каждой панорамы найдётся сам («Авто»). Если знаете точно — выберите, так надёжнее.</p>
+  </div>
+  <div class="ctrls">
+    <button class="done-btn" id="multiGo" style="justify-self:stretch">Собрать сферу</button>
   </div>
 </section>
 
@@ -928,7 +1003,7 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
     }
     if (sigUp) for (let c = 0; c < N; c++) { const r = upRes(C2Ws[c], c); E += (r[0] * r[0] + r[1] * r[1]) / (sigUp * sigUp); }
     for (let c = 1; c < N; c++) { const l = logSO3(m3mul(C2Ws[c], m3T(cams[c].C2Wprior))); E += (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) / (sigR * sigR); }
-    if (sigRel) for (let c = 0; c + 1 < N; c++) { const r = relRes(C2Ws, c), e = Math.hypot(r[0], r[1], r[2]) / sigRel; E += e * e; }
+    if (sigRel) for (let c = 0; c + 1 < N; c++) { if (cams[c].group !== cams[c + 1].group) continue; const r = relRes(C2Ws, c), e = Math.hypot(r[0], r[1], r[2]) / sigRel; E += e * e; }
     return E + ph * ph / (sigF * sigF) + kk * kk / (sigK * sigK);
   };
   let C2W = cams.map(c => m3copy(c.C2W));
@@ -978,6 +1053,7 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
       b[p + 1] += w * r[0]; b[p] -= w * r[1]; A[(p + 1) * P + p + 1] += w; A[p * P + p] += w;
     }
     if (sigRel) for (let c = 0; c + 1 < N; c++) {
+      if (cams[c].group !== cams[c + 1].group) continue; // цепочка — только внутри одной панорамы/прохода
       const r = relRes(C2W, c), w = 1 / (sigRel * sigRel), Ck = C2W[c];
       // r_new ≈ r + C_kᵀ(δ_{k+1} − δ_k): Якобианы J_{k+1} = C_kᵀ, J_k = −C_kᵀ; Jᵀ = ±C_k
       const pk = pIdx(c), pk1 = pIdx(c + 1);
@@ -1963,7 +2039,7 @@ function stitchPanorama(frames, opts, report) {
   const rand = rng(12345);
   const cams = frames.map((fr, idx) => ({
     idx, w: fr.w, h: fr.h, rgb: fr.rgb, cx: (fr.w - 1) / 2, cy: (fr.h - 1) / 2, R0: Math.hypot(fr.w, fr.h) / 2, k1: 0,
-    C2W: m3copy(fr.C2W), C2Wprior: m3copy(fr.C2W)
+    C2W: m3copy(fr.C2W), C2Wprior: m3copy(fr.C2W), group: fr.group
   }));
   // 1. пирамиды и углы
   for (let i = 0; i < cams.length; i++) {
@@ -2465,6 +2541,235 @@ function bilinRGB(rgb, w, h, x, y, out, o) {
   }
 }
 
+// ───────────────────────── несколько панорам телефона → кадры для склейки ─────────────────────────
+// Модель «щелевой» панорамы (так её собирает телефон из центральных полос кадров при повороте):
+// столбец x — азимут ψ = x / F (F = f·cos θ — пикселей на радиан поворота), строка y — луч центральной
+// вертикали камеры, наклонённой на θ: y = h/2 + f·tg(θ − e), где e — угол над горизонтом в плоскости столбца.
+// При θ = 0 это обычная цилиндрическая панорама.
+function slitToPix(P, d) {
+  // мировое направление → пиксель панорамы P {w,h,f,F,theta,yaw,span}; null — вне полосы
+  const hor = Math.hypot(d[0], d[1]); let az = Math.atan2(d[0], d[1]);
+  for (let s = 0; s < 2; s++) {
+    const hd = s ? -hor : hor, a = s ? az + Math.PI : az;
+    const e = Math.atan2(d[2], hd), dl = P.theta - e;
+    if (Math.abs(dl) > 1.35) continue;
+    const y = P.h / 2 + P.f * Math.tan(dl) - 0.5;
+    if (y < 0 || y > P.h - 1) continue;
+    let psi = a - P.yaw; psi -= 2 * Math.PI * Math.floor(psi / (2 * Math.PI));
+    let x = psi * P.F - 0.5;
+    if (P.period && x > P.period) x -= P.period;
+    if (x < 0 || x > P.w - 1) continue;
+    return [x, y];
+  }
+  return null;
+}
+function slitSetup(P, k) {
+  P.f = k * P.h; P.F = P.period ? P.period / (2 * Math.PI) : P.f * Math.cos(P.theta) * (P.fs || 1);
+  P.span = Math.min(2 * Math.PI, P.w / P.F); P.full = P.span > 2 * Math.PI - 0.02;
+}
+// мелкая карта градиентов панорамы в развёртке (для поиска взаимного положения панорам).
+// Отображение разделяется: строка развёртки → строка панорамы, столбец → столбец, поэтому считается быстро.
+function slitErpGrad(P, small, W) {
+  const H = W / 2, out = new Float32Array(W * H), m = new Uint8Array(W * H);
+  const sc = small.s, f = P.f * sc, F = P.F * sc, per = P.period ? P.period * sc : 0, sw = small.w, shh = small.h;
+  const xs = new Int32Array(W), xs2 = new Int32Array(W);
+  for (let u = 0; u < W; u++) {
+    const lon = (u + 0.5) / W * 2 * Math.PI - Math.PI;
+    for (let s = 0; s < 2; s++) {
+      let psi = lon + (s ? Math.PI : 0) - P.yaw; psi -= 2 * Math.PI * Math.floor(psi / (2 * Math.PI));
+      let x = psi * F - 0.5; if (per && x > per) x -= per;
+      (s ? xs2 : xs)[u] = x < 0 || x > sw - 1 ? -1 : Math.round(x);
+    }
+  }
+  for (let v = 2; v < H - 2; v++) {
+    const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI;
+    let yy = -1, X = xs;
+    for (let s = 0; s < 2 && yy < 0; s++) {
+      const e = s ? (lat > 0 ? Math.PI - lat : -Math.PI - lat) : lat, dl = P.theta - e;
+      if (Math.abs(dl) > 1.35) continue;
+      const y = shh / 2 + f * Math.tan(dl) - 0.5;
+      if (y >= 0 && y <= shh - 1) { yy = Math.round(y); X = s ? xs2 : xs; }
+    }
+    if (yy < 0) continue;
+    const row = yy * sw, o = v * W;
+    for (let u = 0; u < W; u++) { const x = X[u]; if (x < 0) continue; out[o + u] = small.g[row + x]; m[o + u] = 1; }
+  }
+  return { g: out, m, W, H };
+}
+function slitSmall(src, H0) {
+  // уменьшенная копия: модуль градиента сглаженной яркости
+  const s = H0 / src.h, w = Math.max(8, Math.round(src.w * s)), h = H0, L = new Float32Array(w * h);
+  const kx = src.w / w, ky = src.h / h;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let a = 0, n = 0;
+    const x0 = Math.floor(x * kx), x1 = Math.max(x0 + 1, Math.floor((x + 1) * kx)), y0 = Math.floor(y * ky), y1 = Math.max(y0 + 1, Math.floor((y + 1) * ky));
+    for (let yy = y0; yy < y1; yy += Math.max(1, (y1 - y0) >> 2)) for (let xx = x0; xx < x1; xx += Math.max(1, (x1 - x0) >> 2)) { const p = (yy * src.w + xx) * 3; a += 0.299 * src.rgb[p] + 0.587 * src.rgb[p + 1] + 0.114 * src.rgb[p + 2]; n++; }
+    L[y * w + x] = a / n / 255;
+  }
+  const g = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; g[i] = Math.hypot(L[i + 1] - L[i - 1], L[i + w] - L[i - w]); }
+  return { w, h, g, s };
+}
+// NCC двух карт по общей маске при сдвиге b по долготе на sh пикселей
+function erpShiftNcc(A, B, sh, rows) {
+  const W = A.W; let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+  for (const v of rows) {
+    const o = v * W;
+    for (let u = 0; u < W; u++) {
+      const ia = o + u; if (!A.m[ia]) continue;
+      let ub = u - sh; if (ub < 0) ub += W; else if (ub >= W) ub -= W;
+      const ib = o + ub; if (!B.m[ib]) continue;
+      const a = A.g[ia], b = B.g[ib]; n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+    }
+  }
+  if (n < 150) return { s: -1, n };
+  const va = saa - sa * sa / n, vb = sbb - sb * sb / n;
+  return { s: va > 1e-9 && vb > 1e-9 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : -1, n };
+}
+// panos: [{ rgb, w, h, tilt (° по подсказке) }] → кадры для stitchPanorama
+function panosToFrames(panos, opts, report) {
+  opts = opts || {};
+  const say = (stage, frac, note) => report && report({ stage, frac, note });
+  const D = Math.PI / 180, W = opts.alignW || 360, SH = 120;
+  const Ps = panos.map(p => {
+    const th = (p.tilt || 0) * D, per = detectPeriod(p.rgb, p.w, p.h);
+    // замыкание круга принимаем, только если оно правдоподобно для фокуса телефона (0,68…1,05 высоты)
+    let period = 0;
+    if (per && per.score > 0.88 && Math.abs(th) < 10 * D) {
+      const F = per.period / (2 * Math.PI), lo = 0.68 * p.h * Math.cos(Math.min(1.45, Math.abs(th) + 15 * D)), hi = 1.05 * p.h * Math.cos(Math.max(0, Math.abs(th) - 15 * D));
+      if (F > lo && F < hi) period = per.period;
+    }
+    return { src: p, w: p.w, h: p.h, theta: th, theta0: th, auto: p.tilt == null, yaw: 0, period };
+  });
+  // порядок: от горизонта к полюсам; первая — опорная
+  // опорная — первая «прямо»; панорамы с известным наклоном раньше «авто»
+  let order = Ps.map((p, i) => i).sort((a, b) => (Ps[a].auto - Ps[b].auto) || Math.abs(Ps[a].theta0) - Math.abs(Ps[b].theta0) || a - b);
+  const hz = Ps[order[0]]; if (hz.auto) { hz.auto = false; hz.theta0 = 0; }
+  // фокус (доля высоты панорамы): если горизонтальная панорама замкнута по кругу, он известен точно
+  let k = opts.k || 0.84, kFixed = !!opts.k;
+  if (!opts.k && hz.period) { k = hz.period / (2 * Math.PI) / Math.cos(hz.theta0) / hz.h; kFixed = true; }
+  Ps.forEach(P => { P.theta = P.theta0; P.yaw = 0; P.fs = 1; P.smC = slitSmall(P.src, 72); P.smF = slitSmall(P.src, 220); slitSetup(P, k); });
+  const rowsOf = (comp, E) => { const r = [], W_ = E.W; for (let v = 0; v < E.H; v++) { let a = 0, c = 0; for (let u = 0; u < W_; u += 2) { a += comp.m[v * W_ + u]; c += E.m[v * W_ + u]; } if (a > 3 && c > 3) r.push(v); } return r; };
+  const addTo = (comp, E) => { for (let i = 0; i < E.g.length; i++) if (E.m[i] && !comp.m[i]) { comp.g[i] = E.g[i]; comp.m[i] = 1; } };
+  // 1. грубо: 2° на пиксель, наклон ±15° от указанного (или весь диапазон для «авто»), азимут — полный круг.
+  //    Панораму, которой пока не с чем сравнить, откладываем в конец очереди.
+  const Wc = 180;
+  {
+    const comp = slitErpGrad(hz, hz.smC, Wc), queue = order.slice(1), done = [order[0]], tries = new Map();
+    while (queue.length) {
+      const pi = queue.shift(), P = Ps[pi]; let bj = { s: -2, th: P.theta0, sh: 0, rows: 0 };
+      // у крутых наклонов шаг F ∝ cos θ меняется быстро — там перебираем наклон мельче
+      const ths = [], lo = P.auto ? -86 : P.theta0 / D - 15, hi = P.auto ? 86 : P.theta0 / D + 15;
+      for (let t = lo; t <= hi + 1e-6; t += Math.abs(t) > 52 ? 1 : 3) if (Math.abs(t) <= 88) ths.push(t * D);
+      for (const th of ths) {
+        P.theta = th; P.yaw = 0; slitSetup(P, k);
+        const E = slitErpGrad(P, P.smC, Wc), rows = rowsOf(comp, E); if (rows.length < 2) continue;
+        for (let sh = 0; sh < Wc; sh++) { const r = erpShiftNcc(comp, E, sh, rows); if (r.s > bj.s) bj = { s: r.s, sh, th, rows: rows.length }; }
+      }
+      const t = tries.get(pi) || 0;
+      if ((bj.s < 0.15 || bj.rows < 3) && t < 1 && queue.length) { tries.set(pi, t + 1); queue.push(pi); continue; }
+      P.theta = bj.th; P.yaw = bj.sh / Wc * 2 * Math.PI; slitSetup(P, k); P.coarse = bj.s;
+      addTo(comp, slitErpGrad(P, P.smC, Wc)); done.push(pi);
+      say('panos', done.length / order.length * 0.5);
+    }
+    order = done;
+  }
+  // 2. точно: 0,5° на пиксель, координатный спуск по наклону, шагу F и азимуту каждой панорамы
+  const Wf = 720;
+  const refineAll = (kk, iters) => {
+    Ps.forEach(P => slitSetup(P, kk));
+    const comp = slitErpGrad(hz, hz.smF, Wf); let tot = 0, n = 0;
+    for (let oi = 1; oi < order.length; oi++) {
+      const P = Ps[order[oi]];
+      const evalAt = (th, fs, yp) => {
+        P.theta = th; P.fs = fs; P.yaw = 0; slitSetup(P, kk);
+        const E = slitErpGrad(P, P.smF, Wf), rows = rowsOf(comp, E);
+        let bs = { s: -2, sh: yp };
+        for (let sh = Math.round(yp) - 6; sh <= Math.round(yp) + 6; sh++) { const s2 = ((sh % Wf) + Wf) % Wf, r = erpShiftNcc(comp, E, s2, rows); if (r.s > bs.s) bs = { s: r.s, sh: s2 }; }
+        return bs;
+      };
+      let th = P.theta, fs = P.fs || 1, yp = P.yaw / (2 * Math.PI) * Wf, cur = evalAt(th, fs, yp); yp = cur.sh;
+      for (let it = 0; it < iters; it++) {
+        let moved = false;
+        for (const dt of [-1.5, -0.5, 0.5, 1.5]) { const r = evalAt(th + dt * D, fs, yp); if (r.s > cur.s + 1e-4) { cur = r; th += dt * D; yp = r.sh; moved = true; } }
+        if (!P.period) for (const df of [-0.03, -0.01, 0.01, 0.03]) { const r = evalAt(th, fs + df, yp); if (r.s > cur.s + 1e-4) { cur = r; fs += df; yp = r.sh; moved = true; } }
+        if (!moved) break;
+      }
+      P.theta = th; P.fs = fs; P.yaw = yp / Wf * 2 * Math.PI; slitSetup(P, kk); P.score = cur.s;
+      addTo(comp, slitErpGrad(P, P.smF, Wf));
+      if (cur.s > -1) { tot += cur.s; n++; }
+    }
+    return n ? tot / n : 0;
+  };
+  const snap = () => Ps.map(P => [P.theta, P.yaw, P.fs]), restore = st => Ps.forEach((P, i) => { [P.theta, P.yaw, P.fs] = st[i]; });
+  let bestS = order.length > 1 ? refineAll(k, 3) : 0, bestSt = snap();
+  say('panos', 0.7);
+  if (!kFixed && order.length > 1) {
+    for (const dk of [-0.05, -0.025, 0.025, 0.05]) {
+      restore(bestSt); const sc = refineAll(k + dk, 1);
+      if (sc > bestS + 0.002) { bestS = sc; bestSt = snap(); k += dk; }
+    }
+    restore(bestSt); bestS = refineAll(k, 2); bestSt = snap();
+  }
+  restore(bestSt); Ps.forEach(P => slitSetup(P, k));
+  // 3. панорамы, которые легли плохо (часто — крутой наклон к потолку или полу, где шаг F ∝ cos θ
+  //    очень чувствителен), ищем заново по сетке «наклон × шаг» на фоне уже уложенных остальных
+  const weak = order.slice(1).filter(i => !(Ps[i].score > 0.45));
+  if (weak.length) {
+    for (const pi of weak) {
+      const P = Ps[pi], comp = { g: new Float32Array(Wc * Wc / 2), m: new Uint8Array(Wc * Wc / 2), W: Wc, H: Wc / 2 };
+      order.forEach(j => { if (j !== pi && (j === order[0] || Ps[j].score > 0.45)) addTo(comp, slitErpGrad(Ps[j], Ps[j].smC, Wc)); });
+      const ths = [];
+      if (P.auto) { for (let t = -88; t <= 88; t += Math.abs(t) > 52 ? 1 : 2) ths.push(t * D); }
+      else for (let t = P.theta0 / D - 14; t <= P.theta0 / D + 14; t += Math.abs(t) > 52 ? 1 : 2) if (Math.abs(t) <= 88) ths.push(t * D);
+      let bj = { s: -2 };
+      for (const th of ths) for (const fs of [0.88, 0.94, 1, 1.06, 1.12]) {
+        P.theta = th; P.fs = fs; P.yaw = 0; slitSetup(P, k);
+        const E = slitErpGrad(P, P.smC, Wc), rows = rowsOf(comp, E); if (rows.length < 3) continue;
+        for (let sh = 0; sh < Wc; sh++) { const r = erpShiftNcc(comp, E, sh, rows); if (r.s > bj.s) bj = { s: r.s, sh, th, fs }; }
+      }
+      if (bj.s > (P.score || -1)) { P.theta = bj.th; P.fs = bj.fs; P.yaw = bj.sh / Wc * 2 * Math.PI; slitSetup(P, k); }
+    }
+    refineAll(k, 3);
+  }
+  say('panos', 1);
+  const best = { k, score: bestS };
+  // виртуальные кадры: обычные «снимки» центральной перспективной камерой внутри каждой полосы
+  const fv = Ps[order[0]].f; // фокус виртуальной камеры = фокус панорамы (родное разрешение)
+  const frames = [], info = [];
+  Ps.forEach((P, pi) => {
+    const halfV = Math.atan(P.h / 2 / P.f) - 3.5 * D;
+    const hv = Math.round(2 * fv * Math.tan(halfV) / 2) * 2, wv = Math.round(hv * 0.75 / 2) * 2;
+    const halfH = Math.atan(wv / 2 / fv);
+    const step = Math.min(90 * D, (opts.stepDeg || 24) * D / Math.max(0.3, Math.cos(P.theta)));
+    const lons = [];
+    if (P.full) { const n = Math.max(3, Math.round(2 * Math.PI / step)); for (let i = 0; i < n; i++) lons.push(P.yaw + i * 2 * Math.PI / n); }
+    else {
+      const a0 = halfH / Math.max(0.3, Math.cos(P.theta)), a1 = P.span - a0;
+      if (a1 <= a0) lons.push(P.yaw + P.span / 2);
+      else { const n = Math.max(1, Math.ceil((a1 - a0) / step)); for (let i = 0; i <= n; i++) lons.push(P.yaw + a0 + (a1 - a0) * i / n); }
+    }
+    info.push({ tilt: (P.theta / D).toFixed(1), yaw: (P.yaw / D).toFixed(1), fs: (P.fs || 1).toFixed(2), span: (P.span / D).toFixed(0), full: P.full, frames: lons.length });
+    for (const lon of lons) {
+      const C2W = c2wLookAt(lon, P.theta), rgb = new Uint8Array(wv * hv * 3), cx = (wv - 1) / 2, cy = (hv - 1) / 2;
+      let miss = 0;
+      for (let y = 0; y < hv; y++) for (let x = 0; x < wv; x++) {
+        const vx = (x - cx) / fv, vy = (y - cy) / fv;
+        const d = [C2W[0] * vx + C2W[1] * vy + C2W[2], C2W[3] * vx + C2W[4] * vy + C2W[5], C2W[6] * vx + C2W[7] * vy + C2W[8]];
+        const q = slitToPix(P, d), o = (y * wv + x) * 3;
+        if (!q) { miss++; continue; }
+        const xx = Math.min(P.w - 1.001, q[0]), yy = q[1], x0 = xx | 0, y0 = Math.min(P.h - 2, yy | 0), fx = xx - x0, fy = yy - y0, x1 = Math.min(P.w - 1, x0 + 1);
+        const a = (y0 * P.w + x0) * 3, b = (y0 * P.w + x1) * 3, c = ((y0 + 1) * P.w + x0) * 3, e = ((y0 + 1) * P.w + x1) * 3, sr = P.src.rgb;
+        for (let ch = 0; ch < 3; ch++) rgb[o + ch] = (sr[a + ch] * (1 - fx) + sr[b + ch] * fx) * (1 - fy) + (sr[c + ch] * (1 - fx) + sr[e + ch] * fx) * fy + 0.5;
+      }
+      if (miss > wv * hv * 0.02) continue; // кадр вылез за полосу — пропускаем
+      frames.push({ w: wv, h: hv, rgb, C2W, group: pi });
+    }
+  });
+  Ps.forEach(P => { P.smC = P.smF = null; });
+  return { frames, f: fv, k: best.k, score: best.score, info };
+}
+
 // ───────────────────────── демо-зал (синтетическая сцена) ─────────────────────────
 function hash2(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function vnoise(x, y) {
@@ -2623,7 +2928,7 @@ function renderDemoFrames(opts, report) {
   return { frames, plan, fTrue, f0: 0.75 * Math.max(w, h) };
 }
 
-if (typeof module !== 'undefined') module.exports = {
+if (typeof module !== 'undefined') module.exports = { panosToFrames, slitToPix, slitSetup, slitErpGrad, slitSmall, erpShiftNcc,
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
   compose, measureParallax, calibrateFocal, makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
@@ -2632,7 +2937,7 @@ if (typeof module !== 'undefined') module.exports = {
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
-const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup', 'result']) $('#' + s).hidden = s !== id; window.scrollTo(0, 0); };
+const show = id => { for (const s of ['home', 'capture', 'process', 'panoSetup', 'multiSetup', 'result']) $('#' + s).hidden = s !== id; window.scrollTo(0, 0); };
 const toast = (msg, ms) => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200); };
 const coreSrc = $('#core-src').textContent;
 // ядро в главном потоке (план, матрицы, превью)
@@ -2690,6 +2995,12 @@ self.onmessage = async (e) => {
     const o = Object.assign({}, m.opts, { deferFill: true });
     if (m.type === 'stitch') res = stitchPanorama(m.frames, o, report);
     else if (m.type === 'pano') res = phonePanoToERP(m.src, o, report);
+    else if (m.type === 'multipano') {
+      const pf = panosToFrames(m.panos, {}, report); m.panos = null;
+      if (pf.frames.length < 3) throw new Error('панорамы не удалось совместить — проверьте наклоны');
+      res = stitchPanorama(pf.frames, Object.assign({ f0: pf.f, calibrateFocal: false, baSigF: 0.02, gravityDeg: 2, gyroCheckDeg: 8 }, o), report);
+      extra = { panos: pf.info, panoK: pf.k };
+    }
     else if (m.type === 'demo') {
       const d = renderDemoFrames({ seed: m.seed, handheld: 0.12, person: true, skipNadir: true }, report);
       res = stitchPanorama(d.frames, Object.assign({ f0: d.f0 }, o), report);
@@ -2753,6 +3064,7 @@ function outWidth() { const v = +document.querySelector('input[name=res]:checked
 // ───────────── экран обработки ─────────────
 const STAGES = {
   demo: 'Съёмка демо-зала (имитация телефона)',
+  panos: 'Взаимное положение панорам',
   features: 'Опорные точки на кадрах',
   focal: 'Фокус камеры по перекрытиям',
   match1: 'Грубое совмещение, поправка гироскопа',
@@ -2843,7 +3155,9 @@ function screenAngle() { return (screen.orientation && typeof screen.orientation
 function onOrient(e) { if (e.alpha == null && e.beta == null) return; cap.ori = { a: e.alpha, b: e.beta, g: e.gamma }; cap.oriT = performance.now(); }
 function currentC2W() { return cap.ori ? Core.gyroToC2W(cap.ori.a, cap.ori.b, cap.ori.g, screenAngle()) : null; }
 
-$('#btnCapture').addEventListener('click', async () => {
+$('#btnCapture').addEventListener('click', () => startCamera('points'));
+$('#btnSweep').addEventListener('click', () => startCamera('sweep'));
+async function startCamera(mode) {
   // iOS: разрешение на датчики — строго внутри жеста, до любых ожиданий
   let permP = null;
   if (window.self !== window.top) { toast('Внутри окна Claude камера и датчики заблокированы. Откройте файл по своей https-ссылке прямо в Safari или Chrome.', 7000); return; }
@@ -2862,12 +3176,21 @@ $('#btnCapture').addEventListener('click', async () => {
   // ждём датчики
   const t = performance.now(); while (!cap.ori && performance.now() - t < 1500) await new Promise(r => setTimeout(r, 50));
   if (!cap.ori) { stopCapture(); show('home'); toast('Телефон не передаёт ориентацию (гироскоп). Откройте страницу на телефоне в Chrome или Safari.', 6000); return; }
+  cap.mode = mode; $('#capture').classList.toggle('sweep', mode === 'sweep');
   setupCapturePlan();
   try { cap.wake = await navigator.wakeLock.request('screen'); } catch (e) { }
+  if (mode === 'sweep') {
+    // выбор 3/5 проходов; до выбора — пустой план
+    cap.coach = true; $('#coach').hidden = true; $('#sweepCoach').hidden = false;
+    cap.targets = []; cap.rows = null; cap.rec = false; cap.cand = null; $('#capShutter').classList.remove('rec'); updateCapHud();
+    cap.raf = requestAnimationFrame(sweepLoop);
+    return;
+  }
+  $('#sweepCoach').hidden = true;
   let hideCoach = false; try { hideCoach = localStorage.getItem('sfera360.coach') === '1'; } catch (e) { }
   cap.coach = !hideCoach; $('#coach').hidden = hideCoach;
   cap.raf = requestAnimationFrame(captureLoop);
-});
+}
 
 function setupCapturePlan() {
   const v = $('#video');
@@ -2899,19 +3222,39 @@ function stopCapture() {
   cap.stream = null; cap.ori = null;
   if (cap.wake) { cap.wake.release().catch(() => { }); cap.wake = null; }
 }
-$('#capClose').addEventListener('click', () => { stopCapture(); cap.frames = []; show('home'); });
+$('#capClose').addEventListener('click', () => { if (cap.mode === 'sweep') sweepStop(); stopCapture(); cap.frames = []; cap.rows = null; $('#sweepCoach').hidden = true; show('home'); });
 $('#capGhostBtn').addEventListener('click', () => { cap.ghostMode = (cap.ghostMode + 1) % 3; try { localStorage.setItem('sfera360.ghost', cap.ghostMode); } catch (e) { } syncToolChips(); });
 $('#capAutoBtn').addEventListener('click', () => { cap.auto = !cap.auto; cap.hold = 0; try { localStorage.setItem('sfera360.auto', cap.auto ? '1' : '0'); } catch (e) { } syncToolChips(); });
 $('#coachOk').addEventListener('click', () => { cap.coach = false; $('#coach').hidden = true; if ($('#coachHide').checked) { try { localStorage.setItem('sfera360.coach', '1'); } catch (e) { } } });
 $('#capUndo').addEventListener('click', () => {
+  if (cap.mode === 'sweep') { sweepStop(); }
   const f = cap.frames.pop(); if (!f) return; cap.thumbs.pop();
   if (f.target >= 0) cap.targets[f.target].done = false;
   rebuildCoverage(); updateCapHud();
 });
-$('#capShutter').addEventListener('click', () => doCapture(-1));
-$('#capDone').addEventListener('click', () => { const frames = cap.frames; stopCapture(); stitchCaptured(frames); });
+$('#capShutter').addEventListener('click', () => {
+  if (cap.mode !== 'sweep') return doCapture(-1);
+  if (cap.coach || !cap.rows) return;
+  if (cap.rec) { sweepStop(); return; }
+  if (sweepRow() < 0) { toast('Все проходы сняты — нажмите «Собрать сферу»', 3000); return; }
+  cap.rec = true; cap.cand = null; $('#capShutter').classList.add('rec');
+});
+$('#capDone').addEventListener('click', async () => {
+  if (cap.mode === 'sweep') { sweepStop(); const t = performance.now(); while (cap.sweepBusy > 0 && performance.now() - t < 5000) await new Promise(r => setTimeout(r, 30)); cap.frames = cap.frames.filter(f => f.blob); }
+  const frames = cap.frames; stopCapture(); stitchCaptured(frames);
+});
 
 function updateCapHud() {
+  if (cap.mode === 'sweep') {
+    const n = cap.rows ? cap.rows.length : 0, r = sweepRow();
+    const done = cap.targets.filter(t => t.done).length;
+    $('#capCount').textContent = n ? (r < 0 ? `готово · ${cap.frames.length}` : `${r + 1}/${n} · ${done}/${cap.targets.length}`) : 'проходы';
+    // собирать можно, когда снят хотя бы горизонт
+    const row0 = cap.targets.filter(t => t.row === 0);
+    $('#capDone').disabled = !row0.length || row0.some(t => !t.done);
+    $('#capDone').textContent = r < 0 && n ? 'Собрать сферу' : 'Собрать';
+    return;
+  }
   const done = cap.targets.filter(t => t.done).length;
   const extra = cap.frames.length - done;
   $('#capCount').textContent = `${done} / ${cap.targets.length}` + (extra > 0 ? ` +${extra}` : '');
@@ -3126,6 +3469,139 @@ function captureLoop(now) {
   if (cap.hold >= 480 && !cap.busy) { cap.hold = 0; doCapture(best); }
   drawMinimap(fwd);
 }
+// ═════════ съёмка проходами («как панорама») ═════════
+// Каждый проход — круг по азимуту на постоянном наклоне. Круг разбит на «слоты»; пока кружок
+// проходит через слот, берём несколько кадров и оставляем самый резкий.
+const SWEEP_PLANS = {
+  3: [{ pitch: 0, step: 22.5, name: 'прямо' }, { pitch: 45, step: 22.5, name: 'наклон вверх ≈45°' }, { pitch: -45, step: 22.5, name: 'наклон вниз ≈45°' }],
+  5: [{ pitch: 0, step: 22.5, name: 'прямо' }, { pitch: 45, step: 22.5, name: 'наклон вверх ≈45°' }, { pitch: -45, step: 22.5, name: 'наклон вниз ≈45°' },
+      { pitch: 78, step: 60, name: 'на потолок' }, { pitch: -78, step: 60, name: 'на пол' }]
+};
+const SWEEP_TOL = 4.5; // ° — окно слота, в котором набираются кандидаты
+const SWEEP_MAXSPEED = 28; // °/с — быстрее кадры смазаны
+function sweepStart(n) {
+  // наклон рядов — от вертикального угла кадра: в портрете (≈62°) это ±45°, в альбомной ориентации меньше
+  const vf = 2 * Math.atan(cap.fh / 2 / cap.f0) / D2R, tilt = Math.min(45, Math.round(vf * 0.72));
+  cap.rows = SWEEP_PLANS[n].map(r => Object.assign({}, r, Math.abs(r.pitch) === 45 ? { pitch: Math.sign(r.pitch) * tilt, name: r.name.replace('45', String(tilt)) } : {}));
+  const C = currentC2W(), lon0 = C ? Core.lonLatFromDir(Core.camForward(C))[0] : 0;
+  cap.targets = [];
+  cap.rows.forEach((r, ri) => { const k = Math.round(360 / r.step); for (let i = 0; i < k; i++) cap.targets.push({ dir: Core.dirFromLonLat(lon0 + i * r.step * D2R, r.pitch * D2R), row: ri, pole: Math.abs(r.pitch) > 60, done: false }); });
+  cap.frames = []; cap.thumbs = []; cap.cov.fill(0); cap.rec = false; cap.cand = null; cap.sweepBusy = 0;
+  cap.coach = false; $('#sweepCoach').hidden = true; updateCapHud();
+}
+$('#sweep3').addEventListener('click', () => sweepStart(3));
+$('#sweep5').addEventListener('click', () => sweepStart(5));
+function sweepRow() { if (!cap.rows) return -1; for (let r = 0; r < cap.rows.length; r++) if (cap.targets.some(t => t.row === r && !t.done)) return r; return -1; }
+function sweepStop() { if (cap.cand) sweepCommit(); cap.rec = false; $('#capShutter').classList.remove('rec'); }
+// кандидат: кадр в окне слота; оставляем самый резкий
+function sweepGrab(slot) {
+  const v = $('#video'); if (!v.videoWidth) return;
+  const C = currentC2W(); if (!C) return;
+  if (cap.cand && cap.cand.slot !== slot) sweepCommit();
+  const c = cap.scratch || document.createElement('canvas'); cap.scratch = null;
+  if (c.width !== cap.fw || c.height !== cap.fh) { c.width = cap.fw; c.height = cap.fh; }
+  c.getContext('2d').drawImage(v, 0, 0, cap.fw, cap.fh);
+  const sh = sharpness(c);
+  if (!cap.cand) { cap.cand = { slot, canvas: c, sharp: sh, C2W: C, n: 1 }; return; }
+  cap.cand.n++;
+  if (sh > cap.cand.sharp) { cap.scratch = cap.cand.canvas; Object.assign(cap.cand, { canvas: c, sharp: sh, C2W: C }); }
+  else cap.scratch = c;
+}
+function sweepCommit() {
+  const cd = cap.cand; cap.cand = null; if (!cd) return;
+  const t = cap.targets[cd.slot]; if (t.done) return;
+  t.done = true; markCoverage(cd.C2W);
+  const fr = { blob: null, w: cap.fw, h: cap.fh, C2W: cd.C2W, target: cd.slot, plx: null, cam: cap.camInfo };
+  cap.frames.push(fr);
+  cap.sweepBusy++;
+  const canvas = cd.canvas;
+  canvas.toBlob(b => { fr.blob = b; cap.sweepBusy--; }, 'image/jpeg', 0.93);
+  if ($('#optVibe').checked && navigator.vibrate) navigator.vibrate(12);
+  if (cap.frames.length === 1 && $('#optLock').checked) lockCamera();
+  const r = t.row;
+  if (!cap.targets.some(x => x.row === r && !x.done)) {
+    cap.rec = false; $('#capShutter').classList.remove('rec');
+    const fl = $('#flash'); fl.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => fl.classList.remove('on')));
+    if ($('#optVibe').checked && navigator.vibrate) navigator.vibrate([30, 60, 30]);
+    const nr = sweepRow();
+    toast(nr < 0 ? 'Все проходы готовы' : `Проход ${r + 1} готов. Дальше: ${cap.rows[nr].name}`, 3000);
+  }
+  updateCapHud();
+}
+function sweepLoop(now) {
+  cap.raf = requestAnimationFrame(sweepLoop);
+  const cv = $('#overlay'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const Wc = cv.clientWidth, Hc = cv.clientHeight;
+  if (cv.width !== Math.round(Wc * dpr) || cv.height !== Math.round(Hc * dpr)) { cv.width = Math.round(Wc * dpr); cv.height = Math.round(Hc * dpr); }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, Wc, Hc);
+  const v = $('#video');
+  if (v.videoWidth && (v.videoWidth !== cap.vw || v.videoHeight !== cap.vh)) { cap.vw = v.videoWidth; cap.vh = v.videoHeight; }
+  const s = Math.max(Wc / cap.vw, Hc / cap.vh); cap.disp = { s, ox: (Wc - cap.vw * s) / 2, oy: (Hc - cap.vh * s) / 2 };
+  const C = currentC2W(); if (!C) return;
+  if (cap.prevC2W) { const dt = Math.max(1, now - cap.prevT) / 1000; const sp = Core.rotAngle(Core.m3mul(C, Core.m3T(cap.prevC2W))) / D2R / dt; cap.speed = cap.speed * 0.7 + sp * 0.3; }
+  cap.prevC2W = C; cap.prevT = now;
+  const fwd = Core.camForward(C), p = [0, 0, 0, 0, 0], ll = Core.lonLatFromDir(fwd);
+  const cxs = Wc / 2, cys = Hc / 2, hint = $('#capHint');
+  const latLine = (lat, style, dash, width) => {
+    ctx.lineWidth = width; ctx.strokeStyle = style; ctx.setLineDash(dash); ctx.beginPath(); let st = false;
+    for (let lon = 0; lon <= 360; lon += 2) { projectToScreen(C, Core.dirFromLonLat(lon * D2R, lat * D2R), p); if (p[2] < 0.15) { st = false; continue; } if (!st) { ctx.moveTo(p[0], p[1]); st = true; } else ctx.lineTo(p[0], p[1]); }
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  latLine(0, 'rgba(255,255,255,.25)', [6, 8], 1);
+  if (!cap.rows) { if (hint.textContent !== 'Выберите 3 или 5 проходов') hint.textContent = 'Выберите 3 или 5 проходов'; return; }
+  const r = sweepRow(), row = r >= 0 ? cap.rows[r] : null;
+  // ближайший несделанный слот (в любом проходе — чтобы не терять кадры, если пользователь «перескочил»)
+  let best = -1, bestAng = 9;
+  cap.targets.forEach((t, i) => { if (t.done) return; const a = Math.acos(Math.max(-1, Math.min(1, t.dir[0] * fwd[0] + t.dir[1] * fwd[1] + t.dir[2] * fwd[2]))); if (a < bestAng) { bestAng = a; best = i; } });
+  const inSlot = best >= 0 && bestAng / D2R < (cap.targets[best].pole ? 8 : SWEEP_TOL);
+  const fast = cap.speed > SWEEP_MAXSPEED;
+  // кандидаты и фиксация кадра при выходе из слота
+  if (cap.rec) {
+    if (cap.cand && (!inSlot || best !== cap.cand.slot)) sweepCommit();
+    if (inSlot && !fast && now - (cap.lastGrab || 0) > 60) { cap.lastGrab = now; sweepGrab(best); }
+  }
+  // линия текущего прохода и его слоты
+  if (row) {
+    latLine(row.pitch, '#f2b544', [10, 7], 3);
+    cap.targets.forEach((t, i) => {
+      if (t.row !== r && !(t.done && Math.abs(cap.rows[t.row].pitch - row.pitch) < 50)) return;
+      projectToScreen(C, t.dir, p); if (p[2] < 0.2) return;
+      if (p[0] < -30 || p[1] < -30 || p[0] > Wc + 30 || p[1] > Hc + 30) return;
+      ctx.beginPath();
+      if (t.done) { ctx.arc(p[0], p[1], 6, 0, Math.PI * 2); ctx.fillStyle = 'rgba(63,191,134,.95)'; ctx.fill(); return; }
+      ctx.arc(p[0], p[1], i === best ? 14 : 9, 0, Math.PI * 2); ctx.lineWidth = i === best ? 3 : 2; ctx.strokeStyle = i === best ? '#f2b544' : 'rgba(242,181,68,.75)'; ctx.stroke();
+    });
+    // стрелка вверх/вниз, если линия прохода далеко
+    const dPitch = row.pitch - ll[1] / D2R;
+    if (Math.abs(dPitch) > 12) {
+      const up = dPitch > 0, ay = up ? cys - 120 : cys + 120;
+      ctx.save(); ctx.translate(cxs, ay); ctx.rotate(up ? -Math.PI / 2 : Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(-12, -16); ctx.lineTo(-5, 0); ctx.lineTo(-12, 16); ctx.closePath(); ctx.fillStyle = '#f2b544'; ctx.fill(); ctx.restore();
+    }
+  }
+  // прицел
+  const good = cap.rec && inSlot && !fast;
+  ctx.beginPath(); ctx.arc(cxs, cys, 24, 0, Math.PI * 2); ctx.lineWidth = 3; ctx.strokeStyle = fast && cap.rec ? '#d9573f' : good ? '#3fbf86' : 'rgba(255,255,255,.9)'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cxs - 8, cys); ctx.lineTo(cxs + 8, cys); ctx.moveTo(cxs, cys - 8); ctx.lineTo(cxs, cys + 8); ctx.lineWidth = 1.5; ctx.stroke();
+  // индикатор скорости над кнопкой: полоса до предела
+  if (cap.rec) {
+    const bw = Math.min(260, Wc * 0.6), bx = cxs - bw / 2, by = Hc - 200 - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sab')) || 0);
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(bx, by, bw, 6);
+    const fr = Math.min(1, cap.speed / (SWEEP_MAXSPEED * 1.4));
+    ctx.fillStyle = fast ? '#d9573f' : cap.speed > SWEEP_MAXSPEED * 0.7 ? '#f2b544' : '#3fbf86'; ctx.fillRect(bx, by, bw * fr, 6);
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(bx + bw / 1.4 - 1, by - 3, 2, 12);
+  }
+  // подсказки
+  let txt;
+  if (r < 0) txt = 'Все проходы сняты. Нажмите «Собрать сферу»';
+  else if (!cap.rec) txt = (cap.targets.some(t => t.row === r && t.done) ? `Продолжите проход ${r + 1}: ` : `Проход ${r + 1}: `) + row.name + '. Нажмите кнопку и поворачивайтесь';
+  else if (fast) txt = 'Медленнее — кадры смазываются';
+  else if (Math.abs(row.pitch - ll[1] / D2R) > 8) txt = row.pitch - ll[1] / D2R > 0 ? 'Наклоните телефон выше, кружок на линию' : 'Наклоните телефон ниже, кружок на линию';
+  else txt = 'Плавно поворачивайтесь по линии';
+  if (hint.textContent !== txt) hint.textContent = txt;
+  drawMinimap(fwd);
+}
+
 function drawMinimap(fwd) {
   const cv = $('#minimap'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
@@ -3258,6 +3734,61 @@ $('#btnDemo').addEventListener('click', async () => {
   $('#procSub').textContent = 'Имитирую съёмку с рук: телефон ходит по дуге вокруг тела, гироскоп дрейфует, мимо идёт человек, пол не снят. Склейка и нейросеть должны с этим справиться.';
   try { const res = await runJob({ type: 'demo', seed: 7, opts: Object.assign({ outW: outWidth() || 4096, maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE }, parOpts()) }); lastSource = { kind: 'demo' }; openResult(res); }
   catch (e) { show('home'); toast('Ошибка демо: ' + e.message, 6000); }
+});
+
+// ───────────── НЕСКОЛЬКО ПАНОРАМ → СФЕРА ─────────────
+const MULTI_ORDER = ['panos', 'features', 'match1', 'ba1', 'match2', 'ba2', 'gains', 'seams', 'align', 'compose', 'ai', 'fill', 'preview'];
+const TILTS = [['auto', 'Авто'], ['0', 'Прямо'], ['45', 'Вверх ≈45°'], ['-45', 'Вниз ≈45°'], ['75', 'Потолок ≈75°'], ['-75', 'Пол ≈75°']];
+const multi = { items: [] };
+$('#lblMultiPano').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#multiPanoFile').click(); } });
+async function decodeScaled(file, maxH) {
+  // панорамы iPhone бывают по 50+ Мп: сразу уменьшаем, иначе Safari упирается в лимит холста
+  let bmp = null;
+  try { const probe = await createImageBitmap(file); const sc = Math.min(1, maxH / probe.height, 12000 / probe.width); if (sc >= 1) bmp = probe; else { probe.close && probe.close(); bmp = await createImageBitmap(file, { resizeWidth: Math.round(probe.width * sc), resizeHeight: Math.round(probe.height * sc), resizeQuality: 'high' }); } }
+  catch (e) { bmp = await createImageBitmap(file); }
+  const sc = Math.min(1, maxH / bmp.height, 12000 / bmp.width), w = Math.round(bmp.width * sc), h = Math.round(bmp.height * sc);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high'; x.drawImage(bmp, 0, 0, w, h); bmp.close && bmp.close();
+  const d = x.getImageData(0, 0, w, h).data, rgb = new Uint8Array(w * h * 3);
+  for (let p = 0, q = 0; p < d.length; p += 4, q += 3) { rgb[q] = d[p]; rgb[q + 1] = d[p + 1]; rgb[q + 2] = d[p + 2]; }
+  return { rgb, w, h, canvas: c };
+}
+$('#multiPanoFile').addEventListener('change', async e => {
+  const files = Array.from(e.target.files || []); e.target.value = '';
+  if (!files.length) return;
+  if (files.length < 2) { toast('Выберите сразу несколько панорам: прямо, вверх, вниз (лучше по две на каждый наклон)', 6000); return; }
+  if (files.length > 8) { toast('Не больше 8 панорам за раз', 4000); return; }
+  show('multiSetup'); const list = $('#multiList'); list.innerHTML = '<li><div class="row"><span>Открываю панорамы…</span></div></li>';
+  multi.items = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const d = await decodeScaled(files[i], 1400);
+      multi.items.push({ rgb: d.rgb, w: d.w, h: d.h, thumb: d.canvas, name: files[i].name });
+    }
+  } catch (err) { show('home'); toast('Не удалось открыть: ' + err.message, 5000); return; }
+  list.innerHTML = '';
+  multi.items.forEach((it, i) => {
+    const li = document.createElement('li');
+    const cv = document.createElement('canvas'); cv.width = Math.min(1200, it.w); cv.height = Math.max(1, Math.round(it.h * cv.width / it.w)); cv.getContext('2d').drawImage(it.thumb, 0, 0, cv.width, cv.height); it.thumb = null;
+    const row = document.createElement('div'); row.className = 'row';
+    const sp = document.createElement('span'); sp.textContent = `Панорама ${i + 1}`;
+    const sel = document.createElement('select'); sel.setAttribute('aria-label', `Наклон панорамы ${i + 1}`);
+    TILTS.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+    sel.value = i === 0 ? '0' : 'auto'; it.sel = sel;
+    row.append(sp, sel); li.append(cv, row); list.appendChild(li);
+  });
+});
+$('#multiBack').addEventListener('click', () => { multi.items = []; show('home'); });
+$('#multiGo').addEventListener('click', async () => {
+  if (multi.items.length < 2) return;
+  if (!multi.items.some(it => it.sel.value === '0')) { toast('Отметьте хотя бы одну панораму как «Прямо»', 4000); return; }
+  const panos = multi.items.map(it => ({ rgb: it.rgb, w: it.w, h: it.h, tilt: it.sel.value === 'auto' ? null : +it.sel.value }));
+  startProcess('Сфера из панорам', MULTI_ORDER);
+  $('#procSub').textContent = `${panos.length} панорамы. Нахожу их положение друг относительно друга, режу на кадры и склеиваю.`;
+  try {
+    const res = await runJob({ type: 'multipano', panos, opts: { outW: outWidth(), maxW: MAXW, previewW: PREVIEW_W, ai: aiOn(), base: BASE } }, panos.map(p => p.rgb.buffer));
+    multi.items = []; lastSource = { kind: 'multipano' }; openResult(res);
+  } catch (e) { show('home'); toast('Не получилось собрать: ' + e.message, 6000); }
 });
 
 // ───────────── ПАНОРАМА ИЗ ГАЛЕРЕИ ─────────────

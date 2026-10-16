@@ -544,7 +544,7 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
     }
     if (sigUp) for (let c = 0; c < N; c++) { const r = upRes(C2Ws[c], c); E += (r[0] * r[0] + r[1] * r[1]) / (sigUp * sigUp); }
     for (let c = 1; c < N; c++) { const l = logSO3(m3mul(C2Ws[c], m3T(cams[c].C2Wprior))); E += (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) / (sigR * sigR); }
-    if (sigRel) for (let c = 0; c + 1 < N; c++) { const r = relRes(C2Ws, c), e = Math.hypot(r[0], r[1], r[2]) / sigRel; E += e * e; }
+    if (sigRel) for (let c = 0; c + 1 < N; c++) { if (cams[c].group !== cams[c + 1].group) continue; const r = relRes(C2Ws, c), e = Math.hypot(r[0], r[1], r[2]) / sigRel; E += e * e; }
     return E + ph * ph / (sigF * sigF) + kk * kk / (sigK * sigK);
   };
   let C2W = cams.map(c => m3copy(c.C2W));
@@ -594,6 +594,7 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
       b[p + 1] += w * r[0]; b[p] -= w * r[1]; A[(p + 1) * P + p + 1] += w; A[p * P + p] += w;
     }
     if (sigRel) for (let c = 0; c + 1 < N; c++) {
+      if (cams[c].group !== cams[c + 1].group) continue; // цепочка — только внутри одной панорамы/прохода
       const r = relRes(C2W, c), w = 1 / (sigRel * sigRel), Ck = C2W[c];
       // r_new ≈ r + C_kᵀ(δ_{k+1} − δ_k): Якобианы J_{k+1} = C_kᵀ, J_k = −C_kᵀ; Jᵀ = ±C_k
       const pk = pIdx(c), pk1 = pIdx(c + 1);
@@ -1579,7 +1580,7 @@ function stitchPanorama(frames, opts, report) {
   const rand = rng(12345);
   const cams = frames.map((fr, idx) => ({
     idx, w: fr.w, h: fr.h, rgb: fr.rgb, cx: (fr.w - 1) / 2, cy: (fr.h - 1) / 2, R0: Math.hypot(fr.w, fr.h) / 2, k1: 0,
-    C2W: m3copy(fr.C2W), C2Wprior: m3copy(fr.C2W)
+    C2W: m3copy(fr.C2W), C2Wprior: m3copy(fr.C2W), group: fr.group
   }));
   // 1. пирамиды и углы
   for (let i = 0; i < cams.length; i++) {
@@ -2081,6 +2082,235 @@ function bilinRGB(rgb, w, h, x, y, out, o) {
   }
 }
 
+// ───────────────────────── несколько панорам телефона → кадры для склейки ─────────────────────────
+// Модель «щелевой» панорамы (так её собирает телефон из центральных полос кадров при повороте):
+// столбец x — азимут ψ = x / F (F = f·cos θ — пикселей на радиан поворота), строка y — луч центральной
+// вертикали камеры, наклонённой на θ: y = h/2 + f·tg(θ − e), где e — угол над горизонтом в плоскости столбца.
+// При θ = 0 это обычная цилиндрическая панорама.
+function slitToPix(P, d) {
+  // мировое направление → пиксель панорамы P {w,h,f,F,theta,yaw,span}; null — вне полосы
+  const hor = Math.hypot(d[0], d[1]); let az = Math.atan2(d[0], d[1]);
+  for (let s = 0; s < 2; s++) {
+    const hd = s ? -hor : hor, a = s ? az + Math.PI : az;
+    const e = Math.atan2(d[2], hd), dl = P.theta - e;
+    if (Math.abs(dl) > 1.35) continue;
+    const y = P.h / 2 + P.f * Math.tan(dl) - 0.5;
+    if (y < 0 || y > P.h - 1) continue;
+    let psi = a - P.yaw; psi -= 2 * Math.PI * Math.floor(psi / (2 * Math.PI));
+    let x = psi * P.F - 0.5;
+    if (P.period && x > P.period) x -= P.period;
+    if (x < 0 || x > P.w - 1) continue;
+    return [x, y];
+  }
+  return null;
+}
+function slitSetup(P, k) {
+  P.f = k * P.h; P.F = P.period ? P.period / (2 * Math.PI) : P.f * Math.cos(P.theta) * (P.fs || 1);
+  P.span = Math.min(2 * Math.PI, P.w / P.F); P.full = P.span > 2 * Math.PI - 0.02;
+}
+// мелкая карта градиентов панорамы в развёртке (для поиска взаимного положения панорам).
+// Отображение разделяется: строка развёртки → строка панорамы, столбец → столбец, поэтому считается быстро.
+function slitErpGrad(P, small, W) {
+  const H = W / 2, out = new Float32Array(W * H), m = new Uint8Array(W * H);
+  const sc = small.s, f = P.f * sc, F = P.F * sc, per = P.period ? P.period * sc : 0, sw = small.w, shh = small.h;
+  const xs = new Int32Array(W), xs2 = new Int32Array(W);
+  for (let u = 0; u < W; u++) {
+    const lon = (u + 0.5) / W * 2 * Math.PI - Math.PI;
+    for (let s = 0; s < 2; s++) {
+      let psi = lon + (s ? Math.PI : 0) - P.yaw; psi -= 2 * Math.PI * Math.floor(psi / (2 * Math.PI));
+      let x = psi * F - 0.5; if (per && x > per) x -= per;
+      (s ? xs2 : xs)[u] = x < 0 || x > sw - 1 ? -1 : Math.round(x);
+    }
+  }
+  for (let v = 2; v < H - 2; v++) {
+    const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI;
+    let yy = -1, X = xs;
+    for (let s = 0; s < 2 && yy < 0; s++) {
+      const e = s ? (lat > 0 ? Math.PI - lat : -Math.PI - lat) : lat, dl = P.theta - e;
+      if (Math.abs(dl) > 1.35) continue;
+      const y = shh / 2 + f * Math.tan(dl) - 0.5;
+      if (y >= 0 && y <= shh - 1) { yy = Math.round(y); X = s ? xs2 : xs; }
+    }
+    if (yy < 0) continue;
+    const row = yy * sw, o = v * W;
+    for (let u = 0; u < W; u++) { const x = X[u]; if (x < 0) continue; out[o + u] = small.g[row + x]; m[o + u] = 1; }
+  }
+  return { g: out, m, W, H };
+}
+function slitSmall(src, H0) {
+  // уменьшенная копия: модуль градиента сглаженной яркости
+  const s = H0 / src.h, w = Math.max(8, Math.round(src.w * s)), h = H0, L = new Float32Array(w * h);
+  const kx = src.w / w, ky = src.h / h;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let a = 0, n = 0;
+    const x0 = Math.floor(x * kx), x1 = Math.max(x0 + 1, Math.floor((x + 1) * kx)), y0 = Math.floor(y * ky), y1 = Math.max(y0 + 1, Math.floor((y + 1) * ky));
+    for (let yy = y0; yy < y1; yy += Math.max(1, (y1 - y0) >> 2)) for (let xx = x0; xx < x1; xx += Math.max(1, (x1 - x0) >> 2)) { const p = (yy * src.w + xx) * 3; a += 0.299 * src.rgb[p] + 0.587 * src.rgb[p + 1] + 0.114 * src.rgb[p + 2]; n++; }
+    L[y * w + x] = a / n / 255;
+  }
+  const g = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; g[i] = Math.hypot(L[i + 1] - L[i - 1], L[i + w] - L[i - w]); }
+  return { w, h, g, s };
+}
+// NCC двух карт по общей маске при сдвиге b по долготе на sh пикселей
+function erpShiftNcc(A, B, sh, rows) {
+  const W = A.W; let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+  for (const v of rows) {
+    const o = v * W;
+    for (let u = 0; u < W; u++) {
+      const ia = o + u; if (!A.m[ia]) continue;
+      let ub = u - sh; if (ub < 0) ub += W; else if (ub >= W) ub -= W;
+      const ib = o + ub; if (!B.m[ib]) continue;
+      const a = A.g[ia], b = B.g[ib]; n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+    }
+  }
+  if (n < 150) return { s: -1, n };
+  const va = saa - sa * sa / n, vb = sbb - sb * sb / n;
+  return { s: va > 1e-9 && vb > 1e-9 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : -1, n };
+}
+// panos: [{ rgb, w, h, tilt (° по подсказке) }] → кадры для stitchPanorama
+function panosToFrames(panos, opts, report) {
+  opts = opts || {};
+  const say = (stage, frac, note) => report && report({ stage, frac, note });
+  const D = Math.PI / 180, W = opts.alignW || 360, SH = 120;
+  const Ps = panos.map(p => {
+    const th = (p.tilt || 0) * D, per = detectPeriod(p.rgb, p.w, p.h);
+    // замыкание круга принимаем, только если оно правдоподобно для фокуса телефона (0,68…1,05 высоты)
+    let period = 0;
+    if (per && per.score > 0.88 && Math.abs(th) < 10 * D) {
+      const F = per.period / (2 * Math.PI), lo = 0.68 * p.h * Math.cos(Math.min(1.45, Math.abs(th) + 15 * D)), hi = 1.05 * p.h * Math.cos(Math.max(0, Math.abs(th) - 15 * D));
+      if (F > lo && F < hi) period = per.period;
+    }
+    return { src: p, w: p.w, h: p.h, theta: th, theta0: th, auto: p.tilt == null, yaw: 0, period };
+  });
+  // порядок: от горизонта к полюсам; первая — опорная
+  // опорная — первая «прямо»; панорамы с известным наклоном раньше «авто»
+  let order = Ps.map((p, i) => i).sort((a, b) => (Ps[a].auto - Ps[b].auto) || Math.abs(Ps[a].theta0) - Math.abs(Ps[b].theta0) || a - b);
+  const hz = Ps[order[0]]; if (hz.auto) { hz.auto = false; hz.theta0 = 0; }
+  // фокус (доля высоты панорамы): если горизонтальная панорама замкнута по кругу, он известен точно
+  let k = opts.k || 0.84, kFixed = !!opts.k;
+  if (!opts.k && hz.period) { k = hz.period / (2 * Math.PI) / Math.cos(hz.theta0) / hz.h; kFixed = true; }
+  Ps.forEach(P => { P.theta = P.theta0; P.yaw = 0; P.fs = 1; P.smC = slitSmall(P.src, 72); P.smF = slitSmall(P.src, 220); slitSetup(P, k); });
+  const rowsOf = (comp, E) => { const r = [], W_ = E.W; for (let v = 0; v < E.H; v++) { let a = 0, c = 0; for (let u = 0; u < W_; u += 2) { a += comp.m[v * W_ + u]; c += E.m[v * W_ + u]; } if (a > 3 && c > 3) r.push(v); } return r; };
+  const addTo = (comp, E) => { for (let i = 0; i < E.g.length; i++) if (E.m[i] && !comp.m[i]) { comp.g[i] = E.g[i]; comp.m[i] = 1; } };
+  // 1. грубо: 2° на пиксель, наклон ±15° от указанного (или весь диапазон для «авто»), азимут — полный круг.
+  //    Панораму, которой пока не с чем сравнить, откладываем в конец очереди.
+  const Wc = 180;
+  {
+    const comp = slitErpGrad(hz, hz.smC, Wc), queue = order.slice(1), done = [order[0]], tries = new Map();
+    while (queue.length) {
+      const pi = queue.shift(), P = Ps[pi]; let bj = { s: -2, th: P.theta0, sh: 0, rows: 0 };
+      // у крутых наклонов шаг F ∝ cos θ меняется быстро — там перебираем наклон мельче
+      const ths = [], lo = P.auto ? -86 : P.theta0 / D - 15, hi = P.auto ? 86 : P.theta0 / D + 15;
+      for (let t = lo; t <= hi + 1e-6; t += Math.abs(t) > 52 ? 1 : 3) if (Math.abs(t) <= 88) ths.push(t * D);
+      for (const th of ths) {
+        P.theta = th; P.yaw = 0; slitSetup(P, k);
+        const E = slitErpGrad(P, P.smC, Wc), rows = rowsOf(comp, E); if (rows.length < 2) continue;
+        for (let sh = 0; sh < Wc; sh++) { const r = erpShiftNcc(comp, E, sh, rows); if (r.s > bj.s) bj = { s: r.s, sh, th, rows: rows.length }; }
+      }
+      const t = tries.get(pi) || 0;
+      if ((bj.s < 0.15 || bj.rows < 3) && t < 1 && queue.length) { tries.set(pi, t + 1); queue.push(pi); continue; }
+      P.theta = bj.th; P.yaw = bj.sh / Wc * 2 * Math.PI; slitSetup(P, k); P.coarse = bj.s;
+      addTo(comp, slitErpGrad(P, P.smC, Wc)); done.push(pi);
+      say('panos', done.length / order.length * 0.5);
+    }
+    order = done;
+  }
+  // 2. точно: 0,5° на пиксель, координатный спуск по наклону, шагу F и азимуту каждой панорамы
+  const Wf = 720;
+  const refineAll = (kk, iters) => {
+    Ps.forEach(P => slitSetup(P, kk));
+    const comp = slitErpGrad(hz, hz.smF, Wf); let tot = 0, n = 0;
+    for (let oi = 1; oi < order.length; oi++) {
+      const P = Ps[order[oi]];
+      const evalAt = (th, fs, yp) => {
+        P.theta = th; P.fs = fs; P.yaw = 0; slitSetup(P, kk);
+        const E = slitErpGrad(P, P.smF, Wf), rows = rowsOf(comp, E);
+        let bs = { s: -2, sh: yp };
+        for (let sh = Math.round(yp) - 6; sh <= Math.round(yp) + 6; sh++) { const s2 = ((sh % Wf) + Wf) % Wf, r = erpShiftNcc(comp, E, s2, rows); if (r.s > bs.s) bs = { s: r.s, sh: s2 }; }
+        return bs;
+      };
+      let th = P.theta, fs = P.fs || 1, yp = P.yaw / (2 * Math.PI) * Wf, cur = evalAt(th, fs, yp); yp = cur.sh;
+      for (let it = 0; it < iters; it++) {
+        let moved = false;
+        for (const dt of [-1.5, -0.5, 0.5, 1.5]) { const r = evalAt(th + dt * D, fs, yp); if (r.s > cur.s + 1e-4) { cur = r; th += dt * D; yp = r.sh; moved = true; } }
+        if (!P.period) for (const df of [-0.03, -0.01, 0.01, 0.03]) { const r = evalAt(th, fs + df, yp); if (r.s > cur.s + 1e-4) { cur = r; fs += df; yp = r.sh; moved = true; } }
+        if (!moved) break;
+      }
+      P.theta = th; P.fs = fs; P.yaw = yp / Wf * 2 * Math.PI; slitSetup(P, kk); P.score = cur.s;
+      addTo(comp, slitErpGrad(P, P.smF, Wf));
+      if (cur.s > -1) { tot += cur.s; n++; }
+    }
+    return n ? tot / n : 0;
+  };
+  const snap = () => Ps.map(P => [P.theta, P.yaw, P.fs]), restore = st => Ps.forEach((P, i) => { [P.theta, P.yaw, P.fs] = st[i]; });
+  let bestS = order.length > 1 ? refineAll(k, 3) : 0, bestSt = snap();
+  say('panos', 0.7);
+  if (!kFixed && order.length > 1) {
+    for (const dk of [-0.05, -0.025, 0.025, 0.05]) {
+      restore(bestSt); const sc = refineAll(k + dk, 1);
+      if (sc > bestS + 0.002) { bestS = sc; bestSt = snap(); k += dk; }
+    }
+    restore(bestSt); bestS = refineAll(k, 2); bestSt = snap();
+  }
+  restore(bestSt); Ps.forEach(P => slitSetup(P, k));
+  // 3. панорамы, которые легли плохо (часто — крутой наклон к потолку или полу, где шаг F ∝ cos θ
+  //    очень чувствителен), ищем заново по сетке «наклон × шаг» на фоне уже уложенных остальных
+  const weak = order.slice(1).filter(i => !(Ps[i].score > 0.45));
+  if (weak.length) {
+    for (const pi of weak) {
+      const P = Ps[pi], comp = { g: new Float32Array(Wc * Wc / 2), m: new Uint8Array(Wc * Wc / 2), W: Wc, H: Wc / 2 };
+      order.forEach(j => { if (j !== pi && (j === order[0] || Ps[j].score > 0.45)) addTo(comp, slitErpGrad(Ps[j], Ps[j].smC, Wc)); });
+      const ths = [];
+      if (P.auto) { for (let t = -88; t <= 88; t += Math.abs(t) > 52 ? 1 : 2) ths.push(t * D); }
+      else for (let t = P.theta0 / D - 14; t <= P.theta0 / D + 14; t += Math.abs(t) > 52 ? 1 : 2) if (Math.abs(t) <= 88) ths.push(t * D);
+      let bj = { s: -2 };
+      for (const th of ths) for (const fs of [0.88, 0.94, 1, 1.06, 1.12]) {
+        P.theta = th; P.fs = fs; P.yaw = 0; slitSetup(P, k);
+        const E = slitErpGrad(P, P.smC, Wc), rows = rowsOf(comp, E); if (rows.length < 3) continue;
+        for (let sh = 0; sh < Wc; sh++) { const r = erpShiftNcc(comp, E, sh, rows); if (r.s > bj.s) bj = { s: r.s, sh, th, fs }; }
+      }
+      if (bj.s > (P.score || -1)) { P.theta = bj.th; P.fs = bj.fs; P.yaw = bj.sh / Wc * 2 * Math.PI; slitSetup(P, k); }
+    }
+    refineAll(k, 3);
+  }
+  say('panos', 1);
+  const best = { k, score: bestS };
+  // виртуальные кадры: обычные «снимки» центральной перспективной камерой внутри каждой полосы
+  const fv = Ps[order[0]].f; // фокус виртуальной камеры = фокус панорамы (родное разрешение)
+  const frames = [], info = [];
+  Ps.forEach((P, pi) => {
+    const halfV = Math.atan(P.h / 2 / P.f) - 3.5 * D;
+    const hv = Math.round(2 * fv * Math.tan(halfV) / 2) * 2, wv = Math.round(hv * 0.75 / 2) * 2;
+    const halfH = Math.atan(wv / 2 / fv);
+    const step = Math.min(90 * D, (opts.stepDeg || 24) * D / Math.max(0.3, Math.cos(P.theta)));
+    const lons = [];
+    if (P.full) { const n = Math.max(3, Math.round(2 * Math.PI / step)); for (let i = 0; i < n; i++) lons.push(P.yaw + i * 2 * Math.PI / n); }
+    else {
+      const a0 = halfH / Math.max(0.3, Math.cos(P.theta)), a1 = P.span - a0;
+      if (a1 <= a0) lons.push(P.yaw + P.span / 2);
+      else { const n = Math.max(1, Math.ceil((a1 - a0) / step)); for (let i = 0; i <= n; i++) lons.push(P.yaw + a0 + (a1 - a0) * i / n); }
+    }
+    info.push({ tilt: (P.theta / D).toFixed(1), yaw: (P.yaw / D).toFixed(1), fs: (P.fs || 1).toFixed(2), span: (P.span / D).toFixed(0), full: P.full, frames: lons.length });
+    for (const lon of lons) {
+      const C2W = c2wLookAt(lon, P.theta), rgb = new Uint8Array(wv * hv * 3), cx = (wv - 1) / 2, cy = (hv - 1) / 2;
+      let miss = 0;
+      for (let y = 0; y < hv; y++) for (let x = 0; x < wv; x++) {
+        const vx = (x - cx) / fv, vy = (y - cy) / fv;
+        const d = [C2W[0] * vx + C2W[1] * vy + C2W[2], C2W[3] * vx + C2W[4] * vy + C2W[5], C2W[6] * vx + C2W[7] * vy + C2W[8]];
+        const q = slitToPix(P, d), o = (y * wv + x) * 3;
+        if (!q) { miss++; continue; }
+        const xx = Math.min(P.w - 1.001, q[0]), yy = q[1], x0 = xx | 0, y0 = Math.min(P.h - 2, yy | 0), fx = xx - x0, fy = yy - y0, x1 = Math.min(P.w - 1, x0 + 1);
+        const a = (y0 * P.w + x0) * 3, b = (y0 * P.w + x1) * 3, c = ((y0 + 1) * P.w + x0) * 3, e = ((y0 + 1) * P.w + x1) * 3, sr = P.src.rgb;
+        for (let ch = 0; ch < 3; ch++) rgb[o + ch] = (sr[a + ch] * (1 - fx) + sr[b + ch] * fx) * (1 - fy) + (sr[c + ch] * (1 - fx) + sr[e + ch] * fx) * fy + 0.5;
+      }
+      if (miss > wv * hv * 0.02) continue; // кадр вылез за полосу — пропускаем
+      frames.push({ w: wv, h: hv, rgb, C2W, group: pi });
+    }
+  });
+  Ps.forEach(P => { P.smC = P.smF = null; });
+  return { frames, f: fv, k: best.k, score: best.score, info };
+}
+
 // ───────────────────────── демо-зал (синтетическая сцена) ─────────────────────────
 function hash2(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function vnoise(x, y) {
@@ -2239,7 +2469,7 @@ function renderDemoFrames(opts, report) {
   return { frames, plan, fTrue, f0: 0.75 * Math.max(w, h) };
 }
 
-if (typeof module !== 'undefined') module.exports = {
+if (typeof module !== 'undefined') module.exports = { panosToFrames, slitToPix, slitSetup, slitErpGrad, slitSmall, erpShiftNcc,
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
   compose, measureParallax, calibrateFocal, makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
