@@ -777,6 +777,60 @@ function calibrateFocal(cams, f0, report) {
   return { f: best, score: bs, scan, pairs: use.length };
 }
 
+// ───────────────────────── параллакс в реальном времени (подсказки при съёмке) ─────────────────────────
+// live, ref: { w, h, g: Float32Array (яркость 0..1) }, C2W живого и опорного, f — фокус в пикселях этих картинок.
+// Возвращает медианный сдвиг (ошибка гироскопа) и разброс сдвигов (параллакс) в градусах.
+function measureParallax(live, ref, C2Wl, C2Wr, f, opts) {
+  opts = opts || {};
+  const R = m3mul(m3T(C2Wr), C2Wl); // луч живой камеры → опорная
+  const cxl = (live.w - 1) / 2, cyl = (live.h - 1) / 2, cxr = (ref.w - 1) / 2, cyr = (ref.h - 1) / 2;
+  const T = opts.t || 7, S = opts.r || 14, GX = opts.gx || 5, GY = opts.gy || 6, n = 2 * T + 1, N = n * n;
+  const mapRef = (x, y, out) => {
+    const vx = (x - cxl) / f, vy = (y - cyl) / f, X = R[0] * vx + R[1] * vy + R[2], Y = R[3] * vx + R[4] * vy + R[5], Z = R[6] * vx + R[7] * vy + R[8];
+    if (Z <= 0.05) return false; out[0] = f * X / Z + cxr; out[1] = f * Y / Z + cyr; return true;
+  };
+  const smp = (img, x, y) => {
+    if (x < 0 || y < 0 || x > img.w - 1.001 || y > img.h - 1.001) return NaN;
+    const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, p = y0 * img.w + x0, g = img.g;
+    return (g[p] * (1 - fx) + g[p + 1] * fx) * (1 - fy) + (g[p + img.w] * (1 - fx) + g[p + img.w + 1] * fx) * fy;
+  };
+  const vecs = [], o = [0, 0], Tl = new Float32Array(N), Wr = new Float32Array((2 * (T + S) + 1) * (2 * (T + S) + 1));
+  for (let gy = 0; gy < GY; gy++) for (let gx = 0; gx < GX; gx++) {
+    const bx = (gx + 0.5) / GX * live.w, by = (gy + 0.5) / GY * live.h;
+    if (bx < T + 1 || by < T + 1 || bx > live.w - T - 2 || by > live.h - T - 2) continue;
+    if (!mapRef(bx, by, o)) continue;
+    const rx = o[0], ry = o[1];
+    if (rx < T + 2 || ry < T + 2 || rx > ref.w - T - 3 || ry > ref.h - T - 3) continue;
+    // шаблон из живого кадра
+    let m = 0, v = 0;
+    for (let y = -T, q = 0; y <= T; y++) for (let x = -T; x <= T; x++, q++) { const val = smp(live, bx + x, by + y); Tl[q] = val; m += val; v += val * val; }
+    m /= N; v -= N * m * m; if (v < N * 0.0004) continue; // нет текстуры
+    const iv = 1 / Math.sqrt(v); for (let q = 0; q < N; q++) Tl[q] = (Tl[q] - m) * iv;
+    // окно опорного кадра, перенесённое в геометрию живого кадра (учитывает поворот изображения между кадрами)
+    const sn = 2 * (T + S) + 1;
+    for (let y = 0, q = 0; y < sn; y++) for (let x = 0; x < sn; x++, q++) Wr[q] = mapRef(bx - T - S + x, by - T - S + y, o) ? smp(ref, o[0], o[1]) : NaN;
+    let best = -2, bxs = 0, bys = 0; const sc = new Float32Array((2 * S + 1) * (2 * S + 1));
+    for (let sy = 0; sy <= 2 * S; sy++) for (let sx = 0; sx <= 2 * S; sx++) {
+      let s1 = 0, s2 = 0, d = 0, ok = true;
+      for (let y = 0; y < n && ok; y++) { const row = (sy + y) * sn + sx, tr = y * n; for (let x = 0; x < n; x++) { const w = Wr[row + x]; if (w !== w) { ok = false; break; } s1 += w; s2 += w * w; d += Tl[tr + x] * w; } }
+      let c = -2; if (ok) { const vv = s2 - s1 * s1 / N; c = vv > 1e-8 ? d / Math.sqrt(vv) : -2; }
+      sc[sy * (2 * S + 1) + sx] = c; if (c > best) { best = c; bxs = sx; bys = sy; }
+    }
+    if (best < (opts.minScore || 0.75)) continue;
+    let second = -2; for (let sy = 0; sy <= 2 * S; sy++) for (let sx = 0; sx <= 2 * S; sx++) if (Math.abs(sx - bxs) > 2 || Math.abs(sy - bys) > 2) second = Math.max(second, sc[sy * (2 * S + 1) + sx]);
+    if (second > best - 0.05) continue;
+    vecs.push([bxs - S, bys - S, best, bx, by]);
+  }
+  if (vecs.length < 4) return { ok: false, n: vecs.length };
+  const xs = vecs.map(v => v[0]).sort((a, b) => a - b), ys = vecs.map(v => v[1]).sort((a, b) => a - b);
+  const mx = xs[xs.length >> 1], my = ys[ys.length >> 1];
+  const res = vecs.map(v => Math.hypot(v[0] - mx, v[1] - my)).sort((a, b) => a - b);
+  // разброс: 80-й перцентиль отклонений (до 1 px — это просто точность измерения)
+  const spread = res[Math.min(res.length - 1, Math.floor(res.length * 0.8))];
+  const toDeg = 180 / Math.PI / f;
+  return { ok: true, n: vecs.length, gyroErr: Math.hypot(mx, my) * toDeg, parallax: Math.max(0, spread - 0.7) * toDeg, vecs };
+}
+
 // ───────────────────────── связка (bundle adjustment по лучам) ─────────────────────────
 function cholSolve(A, b, n) {
   const L = new Float64Array(n * n);
@@ -797,31 +851,41 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
   const N = cams.length, P = 3 * (N - 1) + 2, iphi = P - 2, ik1 = P - 1, R0 = cams[0].R0;
   const pIdx = c => (c === 0 ? -1 : 3 * (c - 1));
   const sigR = pri.sigR || 0.35, sigF = pri.sigF || 0.25, sigK = pri.sigK || 0.15; // приоры: гироскоп ±20°, фокус ±25%, дисторсия ±0.15
+  const sigRel = pri.sigRel || 0; // относительный поворот соседних кадров по гироскопу
+  const relG = []; for (let c = 0; c + 1 < N; c++) relG.push(m3mul(m3T(cams[c].C2Wprior), cams[c + 1].C2Wprior));
+  const relRes = (Cs, c) => logSO3(m3mul(m3mul(m3T(Cs[c]), Cs[c + 1]), m3T(relG[c])));
   let phi = 0, k1 = k1init || 0;
+  const MW = M.w, MH = M.hub; // вес и порог Хьюбера на каждое совпадение (если заданы)
+  const sigUp = pri.sigUp || 0, upG = sigUp ? cams.map(c => [c.C2Wprior[6], c.C2Wprior[7], c.C2Wprior[8]]) : null; // «верх» мира в системе камеры по гироскопу
+  const upRes = (C, c) => { const g = upG[c]; return [C[0] * g[0] + C[1] * g[1] + C[2] * g[2], C[3] * g[0] + C[4] * g[1] + C[5] * g[2]]; }; // x,y мирового образа (должны быть 0)
   const cost = (C2Ws, ph, kk) => {
-    const f = f0 * Math.exp(ph), huber = 2; let E = 0;
+    const f = f0 * Math.exp(ph); let E = 0;
     for (let k = 0; k < M.n; k++) {
+      const huber = MH ? MH[k] : 2, wk = MW ? MW[k] : 1;
       const wi = mv(C2Ws[M.i[k]], rayUK(M.xi[k], M.yi[k], f, kk, R0).u), wj = mv(C2Ws[M.j[k]], rayUK(M.xj[k], M.yj[k], f, kk, R0).u);
-      const e = Math.hypot(wi[0] - wj[0], wi[1] - wj[1], wi[2] - wj[2]) * f0;
-      E += e <= huber ? e * e : 2 * huber * e - huber * huber;
+      const e = Math.hypot(wi[0] - wj[0], wi[1] - wj[1], wi[2] - wj[2]) * f;
+      E += wk * (e <= huber ? e * e : 2 * huber * e - huber * huber);
     }
+    if (sigUp) for (let c = 0; c < N; c++) { const r = upRes(C2Ws[c], c); E += (r[0] * r[0] + r[1] * r[1]) / (sigUp * sigUp); }
     for (let c = 1; c < N; c++) { const l = logSO3(m3mul(C2Ws[c], m3T(cams[c].C2Wprior))); E += (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) / (sigR * sigR); }
+    if (sigRel) for (let c = 0; c + 1 < N; c++) { const r = relRes(C2Ws, c), e = Math.hypot(r[0], r[1], r[2]) / sigRel; E += e * e; }
     return E + ph * ph / (sigF * sigF) + kk * kk / (sigK * sigK);
   };
   let C2W = cams.map(c => m3copy(c.C2W));
   let E = cost(C2W, phi, k1), lambda = 1e-3;
   for (let it = 0; it < iters; it++) {
     const A = new Float64Array(P * P), b = new Float64Array(P);
-    const f = f0 * Math.exp(phi), huber = 2, S = f0; // невязки в пикселях
+    const f = f0 * Math.exp(phi), S = f; // невязки в пикселях текущего фокуса
     for (let k = 0; k < M.n; k++) {
-      const ci = M.i[k], cj = M.j[k];
+      const ci = M.i[k], cj = M.j[k], huber = MH ? MH[k] : 2, wk = MW ? MW[k] : 1;
       const ui = rayUK(M.xi[k], M.yi[k], f, k1, R0), uj = rayUK(M.xj[k], M.yj[k], f, k1, R0);
       const Ri = C2W[ci], Rj = C2W[cj];
       const wi = mv(Ri, ui.u), wj = mv(Rj, uj.u);
       const r = [(wi[0] - wj[0]) * S, (wi[1] - wj[1]) * S, (wi[2] - wj[2]) * S];
-      const e = Math.hypot(r[0], r[1], r[2]); const wt = e <= huber ? 1 : huber / e;
+      const e = Math.hypot(r[0], r[1], r[2]); const wt = wk * (e <= huber ? 1 : huber / e);
       const dwi = mv(Ri, ui.du), dwj = mv(Rj, uj.du), dki = mv(Ri, ui.dk), dkj = mv(Rj, uj.dk);
-      const Jf = [(dwi[0] - dwj[0]) * S, (dwi[1] - dwj[1]) * S, (dwi[2] - dwj[2]) * S];
+      // d(f·Δw)/d log f = f·Δw + f·dΔw/d log f
+      const Jf = [(dwi[0] - dwj[0]) * S + r[0], (dwi[1] - dwj[1]) * S + r[1], (dwi[2] - dwj[2]) * S + r[2]];
       const Jk = [(dki[0] - dkj[0]) * S, (dki[1] - dkj[1]) * S, (dki[2] - dkj[2]) * S];
       // Ji = -[wi]x, Jj = +[wj]x (в пикселях)
       const Ji = skew(wi, -S), Jj = skew(wj, S);
@@ -848,6 +912,22 @@ function bundleAdjust(cams, M, f0, iters, k1init, pri) {
     }
     A[iphi * P + iphi] += 1 / (sigF * sigF); b[iphi] += phi / (sigF * sigF);
     A[ik1 * P + ik1] += 1 / (sigK * sigK); b[ik1] += k1 / (sigK * sigK);
+    if (sigUp) for (let c = 1; c < N; c++) {
+      // r' = r + (δy, −δx): наклон по гравитации
+      const r = upRes(C2W[c], c), p = pIdx(c), w = 1 / (sigUp * sigUp);
+      b[p + 1] += w * r[0]; b[p] -= w * r[1]; A[(p + 1) * P + p + 1] += w; A[p * P + p] += w;
+    }
+    if (sigRel) for (let c = 0; c + 1 < N; c++) {
+      const r = relRes(C2W, c), w = 1 / (sigRel * sigRel), Ck = C2W[c];
+      // r_new ≈ r + C_kᵀ(δ_{k+1} − δ_k): Якобианы J_{k+1} = C_kᵀ, J_k = −C_kᵀ; Jᵀ = ±C_k
+      const pk = pIdx(c), pk1 = pIdx(c + 1);
+      const Cr = [Ck[0] * r[0] + Ck[1] * r[1] + Ck[2] * r[2], Ck[3] * r[0] + Ck[4] * r[1] + Ck[5] * r[2], Ck[6] * r[0] + Ck[7] * r[1] + Ck[8] * r[2]];
+      for (let a = 0; a < 3; a++) {
+        if (pk1 >= 0) { b[pk1 + a] += w * Cr[a]; A[(pk1 + a) * P + pk1 + a] += w; }
+        if (pk >= 0) { b[pk + a] -= w * Cr[a]; A[(pk + a) * P + pk + a] += w; }
+        if (pk >= 0 && pk1 >= 0) { A[(pk + a) * P + pk1 + a] -= w; A[(pk1 + a) * P + pk + a] -= w; }
+      }
+    }
     let improved = false;
     for (let tries = 0; tries < 8 && !improved; tries++) {
       const Ad = Float64Array.from(A);
@@ -1287,6 +1367,7 @@ function seamLabels(cams, f, gains, depth, LW, report, sopt) {
         const pd = distOff(cam, f * (W2C[0] * dx + W2C[1] * dy + W2C[2] * dz) / cz, f * (W2C[3] * dx + W2C[4] * dy + W2C[5] * dz) / cz);
         const x = pd[0] + cam.cx, y = pd[1] + cam.cy;
         if (x < 1 || y < 1 || x > cam.w - 2 || y > cam.h - 2) continue;
+        if (cam.trimY && y > cam.trimY) continue;
         const cell = v * LW + u; if (nc[cell] >= K) continue;
         const wx = 1 - Math.abs((x - cam.cx) / (cam.cx + 0.5)), wy = 1 - Math.abs((y - cam.cy) / (cam.cy + 0.5));
         const sx = Math.min(sw - 1.001, Math.max(0, (x + 0.5) / D - 0.5)), sy = Math.min(sh - 1.001, Math.max(0, (y + 0.5) / D - 0.5));
@@ -1397,6 +1478,147 @@ function seamWeights(seams, ci, sigma) {
   return a;
 }
 
+// ───────────────────────── локальное выравнивание по швам (deghosting) ─────────────────────────
+// Вдоль шва между кадрами A и B измеряем сдвиг t содержимого B относительно A (в касательной плоскости сферы).
+// Каждый кадр получает гладкое поле смещений: на шве A — −t/2, B — +t/2, к середине кадра поправка затухает.
+function projCam(cam, f, W2C, d) {
+  const cz = W2C[6] * d[0] + W2C[7] * d[1] + W2C[8] * d[2]; if (cz <= 1e-6) return null;
+  let x = f * (W2C[0] * d[0] + W2C[1] * d[1] + W2C[2] * d[2]) / cz, y = f * (W2C[3] * d[0] + W2C[4] * d[1] + W2C[5] * d[2]) / cz;
+  if (Math.abs(x) > 1.4 * cam.cx || Math.abs(y) > 1.4 * cam.cy) return null;
+  const k1 = cam.k1 || 0;
+  if (k1) { const xu = x, yu = y, iR = 1 / (cam.R0 * cam.R0); for (let it = 0; it < 4; it++) { const s = 1 + k1 * (x * x + y * y) * iR; x = xu / s; y = yu / s; } }
+  x += cam.cx; y += cam.cy;
+  if (x < 1 || y < 1 || x > cam.w - 2 || y > cam.h - 2) return null;
+  return [x, y];
+}
+function camGray(cam, x, y) {
+  const w = cam.w, x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, p = (y0 * w + x0) * 3, pr = p + w * 3, r = cam.rgb;
+  const g = (q) => 0.299 * r[q] + 0.587 * r[q + 1] + 0.114 * r[q + 2];
+  return (g(p) * (1 - fx) + g(p + 3) * fx) * (1 - fy) + (g(pr) * (1 - fx) + g(pr + 3) * fx) * fy;
+}
+// касательный базис в направлении d: восток, север
+function tangentBasis(d) {
+  const lon = Math.atan2(d[0], d[1]), lat = Math.asin(Math.max(-1, Math.min(1, d[2])));
+  const e = [Math.cos(lon), -Math.sin(lon), 0], n = [-Math.sin(lat) * Math.sin(lon), -Math.sin(lat) * Math.cos(lon), Math.cos(lat)];
+  return [e, n];
+}
+// патч size×size с шагом step (рад) вокруг d, смещённый на (ox, oy) пикселей патча
+function renderPatch(cam, f, W2C, d, E, Nn, step, size, ox, oy) {
+  const out = new Float32Array(size * size), c = (size - 1) / 2; let bad = 0;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const a = (x - c + ox) * step, b = -(y - c + oy) * step;
+    const v = [d[0] + a * E[0] + b * Nn[0], d[1] + a * E[1] + b * Nn[1], d[2] + a * E[2] + b * Nn[2]];
+    const p = projCam(cam, f, W2C, v);
+    if (!p) { out[y * size + x] = NaN; bad++; } else out[y * size + x] = camGray(cam, p[0], p[1]);
+  }
+  return bad > size * size * 0.2 ? null : out;
+}
+function nccShift(A, B, size, inner, R) {
+  // ищем сдвиг (sx, sy) такой, что B(x + s) ≈ A(x); A — центральный квадрат inner×inner, B — весь патч
+  const off = (size - inner) / 2, N = inner * inner;
+  let ma = 0, va = 0; for (let y = 0; y < inner; y++) for (let x = 0; x < inner; x++) { const v = A[(y + off) * size + x + off]; if (v !== v) return null; ma += v; va += v * v; }
+  ma /= N; va = va - N * ma * ma; if (!(va > N * 9)) return null; // мало текстуры
+  let best = -2, bx = 0, by = 0; const sc = new Float32Array((2 * R + 1) * (2 * R + 1));
+  for (let sy = -R; sy <= R; sy++) for (let sx = -R; sx <= R; sx++) {
+    let mb = 0, vb = 0, ab = 0, ok = true;
+    for (let y = 0; y < inner && ok; y++) for (let x = 0; x < inner; x++) {
+      const bv = B[(y + off + sy) * size + x + off + sx]; if (bv !== bv) { ok = false; break; }
+      const av = A[(y + off) * size + x + off]; mb += bv; vb += bv * bv; ab += av * bv;
+    }
+    let s = -2;
+    if (ok) { mb /= N; const vv = vb - N * mb * mb; if (vv > 1e-6) s = (ab - N * ma * mb) / Math.sqrt(va * vv); }
+    sc[(sy + R) * (2 * R + 1) + sx + R] = s;
+    if (s > best) { best = s; bx = sx; by = sy; }
+  }
+  // субпиксель
+  const at = (x, y) => (Math.abs(x) <= R && Math.abs(y) <= R ? sc[(y + R) * (2 * R + 1) + x + R] : -2);
+  let dx = 0, dy = 0;
+  { const a = at(bx - 1, by), c = at(bx + 1, by), den = a - 2 * best + c; if (a > -1.5 && c > -1.5 && den < -1e-6) dx = Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)); }
+  { const a = at(bx, by - 1), c = at(bx, by + 1), den = a - 2 * best + c; if (a > -1.5 && c > -1.5 && den < -1e-6) dy = Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)); }
+  // однозначность: второй максимум вдали от первого
+  let second = -2; for (let sy = -R; sy <= R; sy++) for (let sx = -R; sx <= R; sx++) if (Math.abs(sx - bx) > 2 || Math.abs(sy - by) > 2) second = Math.max(second, sc[(sy + R) * (2 * R + 1) + sx + R]);
+  return { sx: bx + dx, sy: by + dy, score: best, second };
+}
+function seamAlign(cams, f, seams, W, opts, report) {
+  opts = opts || {};
+  const { LW, LH, lab } = seams, pix = 2 * Math.PI / W, N = cams.length;
+  const W2C = cams.map(c => m3T(c.C2W));
+  const cellDir = (u, v) => dirFromLonLat((u + 0.5) / LW * 2 * Math.PI - Math.PI, Math.PI / 2 - (v + 0.5) / LH * Math.PI);
+  // точки на швах (прореживание: каждые ~3 клетки)
+  const samples = [], seen = new Uint8Array(LW * LH), stepCells = opts.seamStep || 3;
+  for (let v = 1; v < LH - 1; v++) for (let u = 0; u < LW; u++) {
+    const p = v * LW + u, a = lab[p]; if (a < 0) continue;
+    for (const q of [v * LW + (u + 1) % LW, p + LW]) {
+      const b = lab[q]; if (b < 0 || b === a) continue;
+      if ((u % stepCells) || (v % stepCells)) continue;
+      if (seen[p]) continue; seen[p] = 1;
+      samples.push({ u, v, a, b });
+    }
+  }
+  const cons = []; // {frame, u, v, e, n} — смещение в радианах (восток, север)
+  const S1 = 40, I1 = 24; // размер патча и внутренней части
+  let done = 0; const fail = { patch1: 0, tex1: 0, low1: 0, patch2: 0, tex2: 0, low2: 0, amb: 0, big: 0 };
+  for (const smp of samples) {
+    done++; if (report && (done & 63) === 0) report(0.8 * done / samples.length);
+    const d = cellDir(smp.u, smp.v), [E, Nn] = tangentBasis(d), A = cams[smp.a], B = cams[smp.b];
+    // грубо: шаг 3 пикселя кадра, поиск ±10 (= ±30 px кадра)
+    const fp = 1 / f, R1 = 10, I0 = 16, step1 = fp * 3;
+    const pa1 = renderPatch(A, f, W2C[smp.a], d, E, Nn, step1, I0 + 2 * R1, 0, 0), pb1 = renderPatch(B, f, W2C[smp.b], d, E, Nn, step1, I0 + 2 * R1, 0, 0);
+    if (!pa1 || !pb1) { fail.patch1++; continue; }
+    const r1 = nccShift(pa1, pb1, I0 + 2 * R1, I0, R1); if (!r1) { fail.tex1++; continue; } if (r1.score < 0.6) { fail.low1++; continue; }
+    // точно: шаг 1 пиксель кадра, поиск ±4 вокруг грубого
+    const step2 = fp, sc = 3, R2 = 4;
+    const pa2 = renderPatch(A, f, W2C[smp.a], d, E, Nn, step2, I1 + 2 * R2, 0, 0), pb2 = renderPatch(B, f, W2C[smp.b], d, E, Nn, step2, I1 + 2 * R2, r1.sx * sc, r1.sy * sc);
+    if (!pa2 || !pb2) { fail.patch2++; continue; }
+    const r2 = nccShift(pa2, pb2, I1 + 2 * R2, I1, R2); if (!r2) { fail.tex2++; continue; } if (r2.score < 0.8) { fail.low2++; continue; } if (r2.second > r2.score - 0.04) { fail.amb++; continue; }
+    const tx = (r1.sx * sc + r2.sx) * step2, ty = -(r1.sy * sc + r2.sy) * step2; // радианы (восток, север)
+    if (Math.hypot(tx, ty) > 40 * fp) { fail.big++; continue; }
+    cons.push({ u: smp.u, v: smp.v, a: smp.a, b: smp.b, tx, ty, w: r2.score });
+  }
+  // отбраковка выбросов: сравнение с медианой соседей по тому же шву
+  const good = cons.filter((c, i) => {
+    const nb = cons.filter(o => o !== c && ((o.a === c.a && o.b === c.b) || (o.a === c.b && o.b === c.a)) && Math.abs(o.v - c.v) <= 10 && Math.min(Math.abs(o.u - c.u), LW - Math.abs(o.u - c.u)) <= 10);
+    const fp = 1 / f;
+    if (nb.length < 2) return nb.length >= 1 ? Math.hypot(nb[0].tx * (nb[0].a === c.a ? 1 : -1) - c.tx, nb[0].ty * (nb[0].a === c.a ? 1 : -1) - c.ty) < 8 * fp : false;
+    const xs = nb.map(o => o.tx * (o.a === c.a ? 1 : -1)).sort((p, q) => p - q), ys = nb.map(o => o.ty * (o.a === c.a ? 1 : -1)).sort((p, q) => p - q);
+    return Math.hypot(xs[xs.length >> 1] - c.tx, ys[ys.length >> 1] - c.ty) < 6 * fp;
+  });
+  // поля смещений на грубой сетке
+  const GW = LW >> 1, GH = LH >> 1, fields = new Array(N).fill(null);
+  const per = Array.from({ length: N }, () => []);
+  for (const c of good) { per[c.a].push([c.u >> 1, c.v >> 1, -c.tx / 2, -c.ty / 2, c.w]); per[c.b].push([c.u >> 1, c.v >> 1, c.tx / 2, c.ty / 2, c.w]); }
+  for (let i = 0; i < N; i++) {
+    if (per[i].length < 3) continue;
+    // область кадра: клетки, видимые в кадре
+    const vis = new Uint8Array(GW * GH);
+    for (let v = 0; v < GH; v++) for (let u = 0; u < GW; u++) { const d = dirFromLonLat((u + 0.5) / GW * 2 * Math.PI - Math.PI, Math.PI / 2 - (v + 0.5) / GH * Math.PI); if (projCam(cams[i], f, W2C[i], d)) vis[v * GW + u] = 1; }
+    const ce = new Float32Array(GW * GH), cn = new Float32Array(GW * GH), cw = new Float32Array(GW * GH);
+    for (const [u, v, e, n, w] of per[i]) { const k = v * GW + u; ce[k] += w * e; cn[k] += w * n; cw[k] += w; }
+    let De = new Float32Array(GW * GH), Dn = new Float32Array(GW * GH);
+    const wc = 20, eps = 0.002;
+    for (let it = 0; it < (opts.alignIters || 600); it++) {
+      for (let v = 0; v < GH; v++) for (let u = 0; u < GW; u++) {
+        const k = v * GW + u; if (!vis[k]) continue;
+        let se = 0, sn = 0, sw = 0;
+        const nbs = [v * GW + (u + 1) % GW, v * GW + (u + GW - 1) % GW, v > 0 ? k - GW : -1, v < GH - 1 ? k + GW : -1];
+        for (const q of nbs) { if (q < 0 || !vis[q]) continue; se += De[q]; sn += Dn[q]; sw += 1; }
+        const den = sw + wc * cw[k] + eps;
+        De[k] = (se + wc * ce[k]) / den; Dn[k] = (sn + wc * cn[k]) / den;
+      }
+    }
+    fields[i] = { GW, GH, de: De, dn: Dn };
+    if (report) report(0.8 + 0.2 * (i + 1) / N);
+  }
+  if (opts.debugAlign) console.log('align fail', JSON.stringify(fail));
+  return { fields, constraints: good.length, tried: samples.length, raw: cons.length };
+}
+function fieldAt(F, u, v) { // u,v в долях (0..1)
+  const x = u * F.GW - 0.5, y = Math.max(0, Math.min(F.GH - 1.001, v * F.GH - 0.5));
+  const x0 = Math.floor(x), y0 = y | 0, fx = x - x0, fy = y - y0, xa = ((x0 % F.GW) + F.GW) % F.GW, xb = (xa + 1) % F.GW, G = F.GW;
+  const bl = (A) => (A[y0 * G + xa] * (1 - fx) + A[y0 * G + xb] * fx) * (1 - fy) + (A[(y0 + 1) * G + xa] * (1 - fx) + A[(y0 + 1) * G + xb] * fx) * fy;
+  return [bl(F.de), bl(F.dn)];
+}
+
 // ───────────────────────── сшивка в equirectangular ─────────────────────────
 function lowBand(cam) {
   const D = 8, w = cam.w, h = cam.h, lw = Math.ceil(w / D), lh = Math.ceil(h / D);
@@ -1432,7 +1654,7 @@ function blurLow(lb, sig) {
   for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) for (let c = 0; c < 3; c++) { let s = 0; for (let i = -rad; i <= rad; i++) s += k[i + rad] * tmp[(cl(y + i, lh) * lw + x) * 3 + c]; out[(y * lw + x) * 3 + c] = s; }
   return { lw, lh, D: lb.D, a: out };
 }
-function compose(cams, f, gains, W, progress, depth, seams, opts) {
+function compose(cams, f, gains, W, progress, depth, seams, opts, align) {
   opts = opts || {};
   const H = W / 2, rgba = new Uint8ClampedArray(W * H * 4), covered = new Uint8Array(W * H);
   const sinL = new Float64Array(W), cosL = new Float64Array(W);
@@ -1444,7 +1666,9 @@ function compose(cams, f, gains, W, progress, depth, seams, opts) {
     const half = Math.atan(Math.hypot(c.cx + 1, c.cy + 1) / f) + (depth ? Math.min(0.6, Math.asin(Math.min(1, iDmax * cn)) * 1.2) : 0);
     const fw = camForward(c.C2W), ll = lonLatFromDir(fw);
     const ci = cams.indexOf(c);
-    const sw = seams ? { hi: seamWeights(seams, ci, opts.seamHi || 1.0), lo: seamWeights(seams, ci, opts.seamLo || 2.5) } : null;
+    // ширина переходов на шве — в пикселях панорамы (детали ~8 px, средние частоты ~20 px), независимо от сетки швов
+    const cellPx = seams ? W / seams.LW : 1;
+    const sw = seams ? { hi: seamWeights(seams, ci, Math.max(0.5, (opts.seamHiPx || 8) / cellPx)), lo: seamWeights(seams, ci, Math.max(0.8, (opts.seamLoPx || 20) / cellPx)) } : null;
     if (sw) sw.any = true;
     const lb = c.low || (c.low = lowBand(c)), vb = c.vlow || (c.vlow = blurLow(lb, 10));
     return { W2C, ctr, sw, par: depth && cn > 1e-9, czMin: Math.cos(Math.min(half + 0.02, Math.PI / 2 - 0.01)), latC: ll[1], half: half + 0.03, lb, vb };
@@ -1467,6 +1691,7 @@ function compose(cams, f, gains, W, progress, depth, seams, opts) {
           if (Math.abs(x) > 1.4 * cam.cx || Math.abs(y) > 1.4 * cam.cy) continue; // далеко за кадром: обратная дисторсия там не определена
           if (k1c) { const xu = x, yu = y; for (let it = 0; it < 4; it++) { const s2 = 1 + k1c * (x * x + y * y) * iR0; x = xu / s2; y = yu / s2; } }
           x += cam.cx; y += cam.cy; if (x < 0 || y < 0 || x > cam.w - 1 || y > cam.h - 1) continue;
+          if (cam.trimY && y > cam.trimY) continue;
           const w = (1 - Math.abs((x - cam.cx) / (cam.cx + 0.5))) * (1 - Math.abs((y - cam.cy) / (cam.cy + 0.5))); if (w <= 0) continue;
           let lx = Math.max(0, Math.min(vb.lw - 1.001, (x + 0.5) / vb.D - 0.5)), ly = Math.max(0, Math.min(vb.lh - 1.001, (y + 0.5) / vb.D - 0.5));
           const x0 = lx | 0, y0 = ly | 0, fx = lx - x0, fy = ly - y0, q = (y0 * vb.lw + x0) * 3, qr = q + vb.lw * 3, a = vb.a, k = v * VW + u;
@@ -1497,7 +1722,8 @@ function compose(cams, f, gains, W, progress, depth, seams, opts) {
         const lat = Math.PI / 2 - (v + 0.5) / H * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
         const A = M[6] * cl, B = M[7] * cl, C = M[8] * sl, Rr = Math.hypot(A, B);
         const iDoff = (v - v0) * W;
-        const pc = inf.ctr, par = inf.par, SW = inf.sw;
+        const pc = inf.ctr, par = inf.par, SW = inf.sw, AF = align && align.fields[ci];
+        const slat = sl, clat = cl;
         let sRow0 = 0, sRow1 = 0, sFy = 0, LWs = 0;
         if (SW) { LWs = seams.LW; let sy = (v + 0.5) / H * seams.LH - 0.5; if (sy < 0) sy = 0; if (sy > seams.LH - 1) sy = seams.LH - 1; const y0 = Math.min(seams.LH - 2, Math.floor(sy)); sFy = sy - y0; sRow0 = y0 * LWs; sRow1 = sRow0 + LWs; }
         let uStart, uCount;
@@ -1525,6 +1751,11 @@ function compose(cams, f, gains, W, progress, depth, seams, opts) {
             if (loS < 0.002 && hiS < 0.002 && SW.any) continue;
           }
           if (par) { const q = iDband[iDoff + u]; dx -= q * pc[0]; dy -= q * pc[1]; dz -= q * pc[2]; }
+          if (AF) { // локальное выравнивание: сдвиг направления в касательной плоскости
+            const t = fieldAt(AF, (u + 0.5) / W, (v + 0.5) / H), te = t[0], tn = t[1];
+            const sL = sinL[u], cL = cosL[u];
+            dx += te * cL - tn * slat * sL; dy += -te * sL - tn * slat * cL; dz += tn * clat;
+          }
           const cz = M[6] * dx + M[7] * dy + M[8] * dz; if (cz <= 1e-6) continue;
           const iz = f / cz;
           let x = (M[0] * dx + M[1] * dy + M[2] * dz) * iz, y = (M[3] * dx + M[4] * dy + M[5] * dz) * iz;
@@ -1532,6 +1763,7 @@ function compose(cams, f, gains, W, progress, depth, seams, opts) {
           if (k1c) { const xu = x, yu = y; for (let it = 0; it < 4; it++) { const s2 = 1 + k1c * (x * x + y * y) * iR0; x = xu / s2; y = yu / s2; } }
           x += cam.cx; y += cam.cy;
           if (x < 0 || y < 0 || x > cw - 1 || y > ch - 1) continue;
+          if (cam.trimY && y > cam.trimY) continue;
           const wx = 1 - Math.abs((x - cam.cx) * icx), wy = 1 - Math.abs((y - cam.cy) * icy);
           const w = wx * wy; if (w <= 0) continue;
           // полный кадр (линейный) билинейно
@@ -1704,8 +1936,25 @@ function stitchPanorama(frames, opts, report) {
     const n = all.length, M = { n, i: new Int32Array(n), j: new Int32Array(n), xi: new Float64Array(n), yi: new Float64Array(n), xj: new Float64Array(n), yj: new Float64Array(n) };
     all.forEach(([i, j, m], k) => { M.i[k] = i; M.j[k] = j; M.xi[k] = m.xi - cams[i].cx; M.yi[k] = m.yi - cams[i].cy; M.xj[k] = m.xj - cams[j].cx; M.yj[k] = m.yj - cams[j].cy; });
     if (!n) return null;
+    if (opts.pairWeights !== false) {
+      // пара с сильным параллаксом (большой разброс относительно лучшего поворота) весит мало; число точек в паре почти не важно
+      M.w = new Float64Array(n); M.hub = new Float64Array(n);
+      const byPair = new Map(); all.forEach(([i, j], k) => { const key = i * 1000 + j; if (!byPair.has(key)) byPair.set(key, []); byPair.get(key).push(k); });
+      for (const [key, ks] of byPair) {
+        const i = M.i[ks[0]], j = M.j[ks[0]];
+        const A = ks.map(k => camRay(cams[i], f, M.xi[k] + cams[i].cx, M.yi[k] + cams[i].cy)), B = ks.map(k => camRay(cams[j], f, M.xj[k] + cams[j].cx, M.yj[k] + cams[j].cy));
+        const R = kabsch(A, B, A.map((_, q) => q));
+        let s2 = 0; for (let q = 0; q < ks.length; q++) { const v = mv(R, A[q]), d = B[q]; s2 += (v[0] - d[0]) ** 2 + (v[1] - d[1]) ** 2 + (v[2] - d[2]) ** 2; }
+        // пара = одно измерение относительного поворота с точностью σ (её собственный разброс); вклад ~ (Δ/σ)²
+        const rmsPx = Math.sqrt(s2 / ks.length) * f, sig = Math.max(opts.pairSigMinPx || 2, rmsPx), wPair = opts.pairWeight || 2;
+        for (const k of ks) { M.w[k] = wPair / ks.length / (sig * sig); M.hub[k] = 3 * sig; }
+      }
+    }
     // фокус откалиброван — держим его почти фиксированным (иначе связка может «убежать» в вырожденное f → ∞)
-    const r = bundleAdjust(cams, M, f, iters, cams[0].k1, fCal ? { sigF: opts.baSigF || 1e-4, sigK: opts.baSigK || 1e-4, sigR: opts.baSigR || 0.2 } : {});
+    const sigRel = opts.gyroRelDeg === 0 ? 0 : (opts.gyroRelDeg || 1) * Math.PI / 180;
+    const sigUp = opts.gravityDeg === 0 ? 0 : (opts.gravityDeg || 1) * Math.PI / 180;
+    const r = bundleAdjust(cams, M, f, iters, cams[0].k1, { sigF: opts.baSigF || 0.1, sigK: opts.baSigK || 1e-4, sigR: opts.baSigR || 0.2, sigRel, sigUp });
+    if (opts.debugRel) { const rl = []; for (let c = 0; c + 1 < cams.length; c++) { const a = m3mul(m3T(cams[c].C2Wprior), cams[c + 1].C2Wprior), bb = m3mul(m3T(r.C2W[c]), r.C2W[c + 1]); rl.push((rotAngle(m3mul(bb, m3T(a))) * 57.3).toFixed(1)); } console.log('BA rel', sigRel.toFixed(3), rl.join(' ')); }
     const k1 = Math.abs(r.k1) < 0.004 ? 0 : r.k1;
     cams.forEach((c, k) => { c.C2W = r.C2W[k]; c.k1 = k1; }); f = r.f;
     return r;
@@ -1727,6 +1976,13 @@ function stitchPanorama(frames, opts, report) {
     ba2 = runBA(pairsB, 30, 70) || ba2;
   }
   say('ba2', 1, ba2 ? ba2.rms.toFixed(2) : '—');
+  if (opts.debugPairs) for (const p of pairsB) {
+    // поворот по совпадениям этой пары (Кабш) против гироскопа
+    const A = p.matches.map(m => camRay(cams[p.i], f, m.xi, m.yi)), B = p.matches.map(m => camRay(cams[p.j], f, m.xj, m.yj));
+    const Rm = kabsch(A, B, A.map((_, k) => k)), Rg = m3mul(m3T(cams[p.j].C2Wprior), cams[p.i].C2Wprior);
+    const dev = rotAngle(m3mul(Rm, m3T(Rg))) * 57.3;
+    if (dev > 4 || opts.debugPairs === 'all') console.log('pair', p.i, p.j, 'n', p.matches.length, 'match-vs-gyro', dev.toFixed(1) + '°');
+  }
   // 4б. параллакс: если телефон двигался (съёмка с рук), уточняем центры кадров и глубину сцены
   let pba = null, points = null;
   // съёмка «вокруг объектива» даёт ошибку поворотной модели ≲1 px — там параллакс-модель только добавляет свобод
@@ -1797,6 +2053,14 @@ function stitchPanorama(frames, opts, report) {
   const depth = points && points.length > 50 ? buildDepthField(points, opts.depthGW || 192, (opts.depthGW || 192) / 2, opts.depthSmooth) : null;
   // связность: кадры без единой пары остаются на гироскопе
   const linked = new Uint8Array(cams.length); for (const p of pairsB) { linked[p.i] = 1; linked[p.j] = 1; }
+  // 5б. надир: нижняя часть кадра «вниз» смотрит на ноги снимающего — не используем её
+  if (opts.nadirTrim !== false) for (const c of cams) {
+    const fw = camForward(c.C2W);
+    if (fw[2] < -Math.sin(70 * Math.PI / 180)) {
+      // «низ» кадра в мире: куда смотрит ось +y камеры; тело снимающего — со стороны, противоположной верху телефона
+      c.trimY = c.h * (1 - (opts.nadirTrimFrac || 0.42));
+    }
+  }
   // 6. экспозиция
   say('gains', 0); const gains = opts.gainsByMatches ? solveGains(cams, pairsB) : solveGainsOverlap(cams, f); say('gains', 1);
   // 7. размер развёртки
@@ -1808,7 +2072,9 @@ function stitchPanorama(frames, opts, report) {
   say('compose', 0);
   let seams = null;
   if (opts.seams !== false) { say('seams', 0); seams = seamLabels(cams, f, gains, depth, opts.seamW || 512, fr => say('seams', fr), { lambda: opts.seamLambda, medTol: opts.seamMedTol != null ? opts.seamMedTol : 10 }); say('seams', 1); }
-  const out = compose(cams, f, gains, W, fr => say('compose', fr), depth, seams, opts);
+  let align = null;
+  if (seams && opts.localAlign !== false) { say('align', 0); align = seamAlign(cams, f, seams, W, opts, fr => say('align', fr)); say('align', 1, align.constraints + '/' + align.raw + '/' + align.tried); }
+  const out = compose(cams, f, gains, W, fr => say('compose', fr), depth, seams, opts, align);
   let cov = 0; for (let i = 0; i < out.covered.length; i++) cov += out.covered[i];
   let holes = out.W * out.H - cov;
   if (!opts.deferFill) { say('fill', 0); holes = fillHoles(out.rgba, out.covered, out.W, out.H); say('fill', 1); }
@@ -1818,7 +2084,7 @@ function stitchPanorama(frames, opts, report) {
     rgba: out.rgba, covered: out.covered, W: out.W, H: out.H,
     stats: {
       frames: cams.length, pairs: pairsB.length, candidates: cand.length, matches: nMatches,
-      suspicious, fCal: fCal ? +(fCal.f / Math.max(cams[0].w, cams[0].h)).toFixed(4) : null, k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
+      aligned: align ? align.constraints : 0, suspicious, fCal: fCal ? +(fCal.f / Math.max(cams[0].w, cams[0].h)).toFixed(4) : null, k1: cams[0].k1, rms: pba ? pba.rms : ba2 ? ba2.rms : null, rmsRot: ba2 ? ba2.rms : null, parallax: !!pba, armShift: pba ? +(Math.max(...cams.map(c => Math.hypot(...c.center))) / (depth ? 1 / depth.median : 1)).toFixed(3) : 0, f, f0: opts.f0, fovLong: hfovMax, linked: Array.from(linked).reduce((a, b) => a + b, 0),
       coverage: cov / (out.W * out.H), holes, gains: gains.map(g => g.map(v => +v.toFixed(3))), ms: Date.now() - t0
     },
     seams: seams ? { LW: seams.LW, LH: seams.LH, risk: seams.risk, lab: opts.debugSeams ? seams.lab : undefined } : null,
@@ -2298,7 +2564,7 @@ function renderDemoFrames(opts, report) {
 
 if (typeof module !== 'undefined') module.exports = {
   m3mul, m3T, rotX, rotY, rotZ, expSO3, logSO3, rotAngle, polar3, gyroToC2W, dirFromLonLat, lonLatFromDir, camForward,
-  compose, makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
+  compose, measureParallax, calibrateFocal, makePlan, c2wLookAt, stitchPanorama, depthAt, aiFillHoles, aiHealSeams, aiSeamClusters, nativeTile, applyInpaintTile, fillHoles, phonePanoToERP, parseGPano, detectPeriod, renderDemoFrames, demoScene, demoSceneRay, renderPerspective, forEachErpInView, erpSample, rng, downscaleRGBA, downscaleMask,
   lin2srgb, SRGB2LIN
 };
 </script>
