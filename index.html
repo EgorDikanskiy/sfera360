@@ -811,11 +811,16 @@ function calibrateFocal(cams, f0, report) {
     }
     return cnt ? tot / cnt : -1;
   };
+  // скан по абсолютной шкале (доля длинной стороны кадра), независимо от стартового f0:
+  // оценка по гироскопу шумная, поэтому берём максимум сглаженной кривой, а не отдельный пик
+  const L = Math.max(cams[0].w, cams[0].h), lo = 0.66, hi = 1.0, st = 0.015, scan = [];
+  const nS = Math.round((hi - lo) / st) + 1;
+  for (let k = 0; k < nS; k++) { const q = lo + k * st; scan.push([q * L / f0, score(q * L)]); if (report) report((k + 1) / nS); }
   let best = f0, bs = -2;
-  const scan = [];
-  for (let s = 0.70; s <= 1.40001; s += 0.02) { const v = score(f0 * s); scan.push([s, v]); if (v > bs) { bs = v; best = f0 * s; } if (report) report(scan.length / 36); }
-  // уточнение вокруг максимума
-  for (let s = best / f0 - 0.02; s <= best / f0 + 0.02001; s += 0.005) { const v = score(f0 * s); if (v > bs) { bs = v; best = f0 * s; } }
+  for (let k = 1; k < nS - 1; k++) {
+    const v = (scan[k - 1][1] + 2 * scan[k][1] + scan[k + 1][1]) / 4;
+    if (v > bs) { bs = v; best = scan[k][0] * f0; }
+  }
   return { f: best, score: bs, scan, pairs: use.length };
 }
 
@@ -1960,8 +1965,9 @@ function stitchPanorama(frames, opts, report) {
   let fCal = null;
   if (opts.calibrateFocal !== false && cams.length >= 8) {
     say('focal', 0);
-    fCal = calibrateFocal(cams, f, fr => say('focal', fr));
-    if (fCal.pairs >= 4 && fCal.score > 0.05) f = fCal.f;
+    const fScan0 = f; fCal = calibrateFocal(cams, f, fr => say('focal', fr));
+    if (fCal.pairs >= 4 && fCal.score > 0.02) f = fCal.f;
+    if (opts.debugFocal) { const L = Math.max(cams[0].w, cams[0].h); console.log('focal scan', fCal.scan.map(([q, v]) => (q * fScan0 / L).toFixed(2) + ':' + v.toFixed(3)).join(' ')); if (opts.debugFocal === 'stop') throw new Error('stop'); }
     say('focal', 1, (f / Math.max(cams[0].w, cams[0].h)).toFixed(3));
   }
   // 2. кандидаты пар
