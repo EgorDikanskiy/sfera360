@@ -99,8 +99,11 @@ footer.note { text-align: left; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
 .flash.on { opacity: .55; transition: none; }
 
-#ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: .38; mix-blend-mode: normal; }
-.plx { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 128px); width: min(86vw, 340px); background: var(--vf-glass); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 8px 12px 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: grid; gap: 6px; }
+#ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cap-tools { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 122px); display: flex; gap: 8px; }
+.tool-chip { color: var(--vf-ink); font-size: 12px; min-height: 36px; padding: 6px 12px; cursor: pointer; }
+.tool-chip.on { color: #ffb3ef; border-color: rgba(255,92,220,.6); }
+.plx { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 170px); width: min(86vw, 340px); background: var(--vf-glass); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 8px 12px 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: grid; gap: 6px; }
 .plx-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .plx-row b { margin-left: auto; font-size: 13px; }
 .plx-dot { width: 10px; height: 10px; border-radius: 50%; background: #9aa6b2; flex: none; }
@@ -275,13 +278,17 @@ footer.note { text-align: left; }
     <button class="icon-btn" id="capClose" aria-label="Закрыть съёмку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <span class="chip mono" id="capCount">0 / 31</span>
     <span class="spacer"></span>
-    <span class="chip mono" id="capExp">экспозиция: авто</span>
+    <span class="chip mono" id="capExp">яркость: авто</span>
     <button class="icon-btn" id="capUndo" aria-label="Удалить последний кадр"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
   </div>
   <div class="hint" id="capHint" aria-live="polite">Наведите кружок в центре на ближайшую точку</div>
   <div class="plx" id="plx" hidden>
     <div class="plx-row"><span class="plx-dot" id="plxDot"></span><span id="plxTxt">Сдвиг телефона</span><b class="mono" id="plxVal">—</b></div>
     <div class="plx-bar"><i id="plxBar"></i><span class="plx-mark" style="left:33%"></span><span class="plx-mark" style="left:66%"></span></div>
+  </div>
+  <div class="cap-tools">
+    <button class="chip tool-chip" id="capGhostBtn" type="button">Призрак: фото</button>
+    <button class="chip tool-chip" id="capAutoBtn" type="button">Автоснимок: вкл</button>
   </div>
   <div class="coach" id="coach" hidden>
     <div class="coach-card">
@@ -292,9 +299,9 @@ footer.note { text-align: left; }
         <li><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="26" y="14" width="12" height="24" rx="2" fill="currentColor" transform="rotate(-25 32 30)"/><circle cx="32" cy="30" r="3" fill="#f2b544"/><path d="M14 46h36" stroke="currentColor" stroke-width="2"/></svg>
           <div><b>Вверх и вниз — наклоном у камеры</b><span>Для верхнего и нижнего ряда наклоняйте телефон, не опуская и не поднимая руки. Камера остаётся на месте, меняется только направление.</span></div></li>
         <li><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="12" y="16" width="30" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="20" y="22" width="30" height="24" rx="3" fill="none" stroke="#f2b544" stroke-width="2" stroke-dasharray="3 3"/></svg>
-          <div><b>Следите за «призраком»</b><span>Возле точки появится полупрозрачный прошлый кадр. Если ближние предметы двоятся, а дальние совпадают, телефон уехал: верните его назад. Полоска «Сдвиг» покажет, когда всё в порядке.</span></div></li>
+          <div><b>Совместите «призрак» и снимайте кнопкой</b><span>Прошлый кадр виден поверх камеры, его контуры — розовые линии. Подвиньте телефон, чтобы линии легли на предметы, и нажмите кнопку. Если дальняя стена совпала, а ближние предметы двоятся, телефон уехал — верните его назад. Когда совпадает идеально, кадр снимется сам.</span></div></li>
       </ol>
-      <p class="coach-tip">Идеально — штатив или монопод: камера телефона над осью вращения. В маленькой комнате это особенно важно.</p>
+      <p class="coach-tip">Яркость и баланс белого фиксируются на первом кадре — начинайте с типичного для комнаты вида, не с окна. Идеально снимать со штатива или монопода: камера телефона над осью вращения.</p>
       <label class="check coach-check"><input type="checkbox" id="coachHide"><span>Больше не показывать</span></label>
       <button class="done-btn" id="coachOk">Понятно, снимаю</button>
     </div>
@@ -576,8 +583,16 @@ function onProgress(m) {
 // ───────────── СЪЁМКА ─────────────
 const cap = { stream: null, track: null, vw: 0, vh: 0, f0: 0, plan: [], targets: [], frames: [], ori: null, oriT: 0, prevC2W: null, prevT: 0, speed: 99, hold: 0, busy: false, raf: 0, wake: null, cov: new Uint8Array(72 * 36), scale: 1, locked: false,
   fRatio: 0.81, // фокус / длинная сторона кадра (у видеопотока iPhone ≈0,81; уточняется при склейке)
-  thumbs: [], plx: { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0 }, coach: false };
-const LW_ = 144, LH_ = 192; // размер миниатюр для индикатора и «призрака» (портрет)
+  thumbs: [], plx: { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0, okSince: 0 }, coach: false,
+  ghostMode: 0, auto: true, gfix: { ref: -1, tx: 0, ty: 0, th: 0 }, camInfo: null };
+const LW_ = 144, LH_ = 192; // миниатюры для замера сдвига (портрет)
+const GW_ = 270, GH_ = 360; // миниатюры для «призрака»
+const GHOST_MODES = ['Призрак: фото', 'Призрак: контуры', 'Призрак: выкл'];
+try { cap.ghostMode = +(localStorage.getItem('sfera360.ghost') || 0) % 3; cap.auto = localStorage.getItem('sfera360.auto') !== '0'; } catch (e) { }
+function syncToolChips() {
+  $('#capGhostBtn').textContent = GHOST_MODES[cap.ghostMode]; $('#capGhostBtn').classList.toggle('on', cap.ghostMode < 2);
+  $('#capAutoBtn').textContent = cap.auto ? 'Автоснимок: вкл' : 'Автоснимок: выкл'; $('#capAutoBtn').classList.toggle('on', cap.auto);
+}
 function screenAngle() { return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0); }
 function onOrient(e) { if (e.alpha == null && e.beta == null) return; cap.ori = { a: e.alpha, b: e.beta, g: e.gamma }; cap.oriT = performance.now(); }
 function currentC2W() { return cap.ori ? Core.gyroToC2W(cap.ori.a, cap.ori.b, cap.ori.g, screenAngle()) : null; }
@@ -620,11 +635,14 @@ function setupCapturePlan() {
   const C = currentC2W(), lon0 = Core.lonLatFromDir(Core.camForward(C))[0];
   cap.targets = cap.plan.map(t => ({ dir: Core.dirFromLonLat(lon0 + t.yaw * D2R, t.pitch * D2R), pole: !!t.pole, row: t.row, done: false }));
   cap.frames = []; cap.thumbs = []; cap.cov.fill(0); cap.locked = false; cap.hold = 0;
-  cap.plx = { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0 };
+  cap.plx = { val: null, state: 'none', t: 0, n: 0, ref: -1, badSince: 0, okSince: 0 }; cap.gfix = { ref: -1, tx: 0, ty: 0, th: 0 };
+  cap.gw = cap.fw <= cap.fh ? GW_ : GH_; cap.gh = cap.fw <= cap.fh ? GH_ : GW_; cap.gbuf = null; cap.camInfo = null;
+  $('#capExp').textContent = 'яркость: авто'; $('#capExp').classList.remove('ok');
+  syncToolChips();
   // миниатюры живого кадра (ориентация кадра: портрет/альбом — как у видео)
   cap.lw = cap.fw <= cap.fh ? LW_ : LH_; cap.lh = cap.fw <= cap.fh ? LH_ : LW_;
   cap.lcv = document.createElement('canvas'); cap.lcv.width = cap.lw; cap.lcv.height = cap.lh;
-  cap.lctx = cap.lcv.getContext('2d', { willReadFrequently: true });
+  cap.lctx = cap.lcv.getContext('2d', { willReadFrequently: true }); cap.lctx.imageSmoothingQuality = 'high';
   cap.gcv = $('#ghost');
   updateCapHud();
 }
@@ -636,6 +654,8 @@ function stopCapture() {
   if (cap.wake) { cap.wake.release().catch(() => { }); cap.wake = null; }
 }
 $('#capClose').addEventListener('click', () => { stopCapture(); cap.frames = []; show('home'); });
+$('#capGhostBtn').addEventListener('click', () => { cap.ghostMode = (cap.ghostMode + 1) % 3; try { localStorage.setItem('sfera360.ghost', cap.ghostMode); } catch (e) { } syncToolChips(); });
+$('#capAutoBtn').addEventListener('click', () => { cap.auto = !cap.auto; cap.hold = 0; try { localStorage.setItem('sfera360.auto', cap.auto ? '1' : '0'); } catch (e) { } syncToolChips(); });
 $('#coachOk').addEventListener('click', () => { cap.coach = false; $('#coach').hidden = true; if ($('#coachHide').checked) { try { localStorage.setItem('sfera360.coach', '1'); } catch (e) { } } });
 $('#capUndo').addEventListener('click', () => {
   const f = cap.frames.pop(); if (!f) return; cap.thumbs.pop();
@@ -680,25 +700,86 @@ function setPlx(val, state) {
   $('#plxTxt').textContent = state === 'ok' ? 'Телефон на месте' : state === 'warn' ? 'Телефон немного сдвинут' : state === 'bad' ? 'Телефон уехал — верните назад' : state === 'unknown' ? 'Мало деталей для проверки' : 'Сдвиг телефона';
   $('#plxBar').style.left = val == null ? '0%' : Math.min(97, val / 3 * 100) + '%';
 }
-// «призрак»: опорный кадр, перенесённый в текущий вид по гироскопу
-function drawGhost(C, refIdx) {
-  const gc = cap.gcv, Wc = gc.clientWidth, Hc = gc.clientHeight, dpr = 1;
+// миниатюры снятого кадра: серая для замера сдвига + яркая цветная и контуры для «призрака»
+function makeThumb(canvas, C2W) {
+  const c = document.createElement('canvas'); c.width = cap.lw; c.height = cap.lh; let x = c.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high'; x.drawImage(canvas, 0, 0, cap.lw, cap.lh);
+  let d = x.getImageData(0, 0, cap.lw, cap.lh).data; const g = new Float32Array(cap.lw * cap.lh);
+  for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
+  const w = cap.gw, h = cap.gh, c2 = document.createElement('canvas'); c2.width = w; c2.height = h; x = c2.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high'; x.drawImage(canvas, 0, 0, w, h);
+  d = x.getImageData(0, 0, w, h).data;
+  // растяжка контраста (2–98 %), чтобы прошлый кадр читался поверх живого
+  const L = new Float32Array(w * h), hist = new Uint32Array(256);
+  for (let i = 0, p = 0; i < L.length; i++, p += 4) { const l = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]; L[i] = l; hist[l | 0]++; }
+  let lo = 0, hi = 255, acc = 0; for (let k = 0; k < 256; k++) { acc += hist[k]; if (acc > L.length * 0.02) { lo = k; break; } }
+  acc = 0; for (let k = 255; k >= 0; k--) { acc += hist[k]; if (acc > L.length * 0.02) { hi = k; break; } }
+  const sc = 255 / Math.max(24, hi - lo), rgba = new Uint8ClampedArray(d.length);
+  for (let p = 0; p < d.length; p += 4) { rgba[p] = (d[p] - lo) * sc; rgba[p + 1] = (d[p + 1] - lo) * sc; rgba[p + 2] = (d[p + 2] - lo) * sc; rgba[p + 3] = 255; }
+  // контуры: сглаживание [1 2 1]² → градиент Собеля → порог по верхним ~10 % → без одиночных точек
+  for (let pass = 0; pass < 2; pass++) {
+    const T = new Float32Array(L);
+    for (let y = 0; y < h; y++) for (let xx = 1; xx < w - 1; xx++) { const i = y * w + xx; T[i] = (L[i - 1] + 2 * L[i] + L[i + 1]) / 4; }
+    for (let y = 1; y < h - 1; y++) for (let xx = 0; xx < w; xx++) { const i = y * w + xx; L[i] = (T[i - w] + 2 * T[i] + T[i + w]) / 4; }
+  }
+  const G = new Float32Array(w * h), vals = [];
+  for (let y = 1; y < h - 1; y++) for (let xx = 1; xx < w - 1; xx++) {
+    const i = y * w + xx;
+    const gx = L[i - w + 1] + 2 * L[i + 1] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - 1] - L[i + w - 1];
+    const gy = L[i + w - 1] + 2 * L[i + w] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - w] - L[i - w + 1];
+    G[i] = Math.hypot(gx, gy); if ((xx + y) % 3 === 0) vals.push(G[i]);
+  }
+  vals.sort((p, q) => p - q);
+  const thr = Math.max(50, vals[Math.floor(vals.length * 0.9)] || 0), edge = new Uint8Array(w * h);
+  for (let i = 0; i < G.length; i++) if (G[i] > thr) edge[i] = 1;
+  for (let y = 1; y < h - 1; y++) for (let xx = 1; xx < w - 1; xx++) {
+    const i = y * w + xx; if (!edge[i]) continue;
+    let n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && edge[i + dy * w + dx] === 1) n++;
+    if (n < 2) edge[i] = 0;
+  }
+  // тёмная кайма вокруг линий (2): линия читается и на светлой стене, и на тёмной мебели
+  for (let y = 1; y < h - 1; y++) for (let xx = 1; xx < w - 1; xx++) { const i = y * w + xx; if (!edge[i] && (edge[i - 1] === 1 || edge[i + 1] === 1 || edge[i - w] === 1 || edge[i + w] === 1)) edge[i] = 2; }
+  return { w: cap.lw, h: cap.lh, g, C2W, gw: w, gh: h, rgba, edge };
+}
+// «призрак»: до трёх ближайших снятых кадров, перенесённых в текущий вид по гироскопу
+// с поправкой по картинке (сдвиг и крен из замера), чтобы дальний план совпадал точно
+function drawGhost(C, fwd) {
+  const gc = cap.gcv, Wc = gc.clientWidth, Hc = gc.clientHeight;
   if (gc.width !== Wc || gc.height !== Hc) { gc.width = Wc; gc.height = Hc; }
   const g = gc.getContext('2d'); g.clearRect(0, 0, Wc, Hc);
-  if (refIdx < 0) return;
-  const t = cap.thumbs[refIdx], w = cap.lw, h = cap.lh, f = cap.fRatio * Math.max(w, h), cx = (w - 1) / 2, cy = (h - 1) / 2;
-  const R = Core.m3mul(Core.m3T(t.C2W), C);
-  if (!cap.gbuf) { cap.gbuf = document.createElement('canvas'); cap.gbuf.width = w; cap.gbuf.height = h; cap.gimg = cap.gbuf.getContext('2d').createImageData(w, h); }
-  const out = cap.gimg.data, src = t.rgba;
+  if (cap.ghostMode === 2 || !cap.thumbs.length) return;
+  const cand = [];
+  cap.thumbs.forEach((t, i) => { const f = Core.camForward(t.C2W), a = Math.acos(Math.max(-1, Math.min(1, f[0] * fwd[0] + f[1] * fwd[1] + f[2] * fwd[2]))); if (a < 60 * D2R) cand.push([a, i]); });
+  if (!cand.length) return;
+  cand.sort((p, q) => p[0] - q[0]);
+  // опорный кадр замера — первым: для него поправка точная
+  const fx = cap.gfix, order = cand.slice(0, 3).map(c => c[1]);
+  if (fx.ref >= 0 && order.includes(fx.ref)) { order.splice(order.indexOf(fx.ref), 1); order.unshift(fx.ref); }
+  const w = cap.gw, h = cap.gh, f = cap.fRatio * Math.max(w, h), cx = (w - 1) / 2, cy = (h - 1) / 2, k = w / cap.lw;
+  const tx = fx.ref >= 0 ? fx.tx * k : 0, ty = fx.ref >= 0 ? fx.ty * k : 0, th = fx.ref >= 0 ? fx.th : 0;
+  const Rs = order.map(i => Core.m3mul(Core.m3T(cap.thumbs[i].C2W), C));
+  if (!cap.gbuf) { cap.gbuf = document.createElement('canvas'); cap.gbuf.width = w; cap.gbuf.height = h; cap.gimg = cap.gbuf.getContext('2d').createImageData(w, h); cap.ebuf = document.createElement('canvas'); cap.ebuf.width = w; cap.ebuf.height = h; cap.eimg = cap.ebuf.getContext('2d').createImageData(w, h); }
+  const out = cap.gimg.data, eo = cap.eimg.data, photo = cap.ghostMode === 0;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const vx = (x - cx) / f, vy = (y - cy) / f, X = R[0] * vx + R[1] * vy + R[2], Y = R[3] * vx + R[4] * vy + R[5], Z = R[6] * vx + R[7] * vy + R[8], o = (y * w + x) * 4;
-    if (Z <= 0.05) { out[o + 3] = 0; continue; }
-    const xr = Math.round(f * X / Z + cx), yr = Math.round(f * Y / Z + cy);
-    if (xr < 0 || yr < 0 || xr >= w || yr >= h) { out[o + 3] = 0; continue; }
-    const p = (yr * w + xr) * 4; out[o] = src[p]; out[o + 1] = src[p + 1]; out[o + 2] = src[p + 2]; out[o + 3] = 255;
+    const o = (y * w + x) * 4; out[o + 3] = 0; eo[o + 3] = 0;
+    const sx = x + tx - th * (y - cy), sy = y + ty + th * (x - cx), vx = (sx - cx) / f, vy = (sy - cy) / f;
+    for (let r = 0; r < Rs.length; r++) {
+      const R = Rs[r], X = R[0] * vx + R[1] * vy + R[2], Y = R[3] * vx + R[4] * vy + R[5], Z = R[6] * vx + R[7] * vy + R[8];
+      if (Z <= 0.05) continue;
+      const xr = Math.round(f * X / Z + cx), yr = Math.round(f * Y / Z + cy);
+      if (xr < 1 || yr < 1 || xr >= w - 1 || yr >= h - 1) continue;
+      const t = cap.thumbs[order[r]], q = yr * w + xr, p = q * 4;
+      if (photo) { out[o] = t.rgba[p]; out[o + 1] = t.rgba[p + 1]; out[o + 2] = t.rgba[p + 2]; out[o + 3] = 255; }
+      const e = t.edge[q];
+      if (e === 1) { eo[o] = 255; eo[o + 1] = 54; eo[o + 2] = 214; eo[o + 3] = 255; } else if (e === 2) { eo[o] = 20; eo[o + 1] = 0; eo[o + 2] = 16; eo[o + 3] = 150; }
+      break;
+    }
   }
-  cap.gbuf.getContext('2d').putImageData(cap.gimg, 0, 0);
-  const S = cap.disp; g.imageSmoothingEnabled = true; g.drawImage(cap.gbuf, S.ox, S.oy, cap.vw * S.s, cap.vh * S.s);
+  const S = cap.disp, dw = cap.vw * S.s, dh = cap.vh * S.s;
+  g.imageSmoothingEnabled = true;
+  if (photo) { cap.gbuf.getContext('2d').putImageData(cap.gimg, 0, 0); g.globalAlpha = 0.5; g.drawImage(cap.gbuf, S.ox, S.oy, dw, dh); }
+  cap.ebuf.getContext('2d').putImageData(cap.eimg, 0, 0);
+  g.globalAlpha = 1; g.drawImage(cap.ebuf, S.ox, S.oy, dw, dh);
 }
 function captureLoop(now) {
   cap.raf = requestAnimationFrame(captureLoop);
@@ -724,26 +805,36 @@ function captureLoop(now) {
   const tol = best >= 0 && cap.targets[best].pole ? 6 : 4;
   const aligned = best >= 0 && bestAng / D2R < tol;
   const still = cap.speed < 7;
-  // сдвиг телефона: сравниваем живой кадр с ближайшим снятым (около точки съёмки)
-  const near = best >= 0 && bestAng / D2R < 14 && cap.thumbs.length > 0;
-  const ref = near ? refFrame(fwd) : -1;
+  // сдвиг телефона: сравниваем живой кадр с ближайшим снятым
+  const ref = cap.thumbs.length ? refFrame(fwd) : -1;
   if (ref >= 0 && now - cap.plx.t > 140 && !cap.busy) {
     cap.plx.t = now;
     const live = liveThumb();
     if (live) {
-      const r = Core.measureParallax(live, cap.thumbs[ref], C, cap.thumbs[ref].C2W, cap.fRatio * Math.max(cap.lw, cap.lh), { r: 18, gx: 5, gy: 7, t: 6, minScore: 0.7 });
-      if (r.ok) { cap.plx.val = cap.plx.val == null || cap.plx.ref !== ref ? r.parallax : cap.plx.val * 0.5 + r.parallax * 0.5; cap.plx.n = r.n; }
-      else { cap.plx.val = null; cap.plx.n = r.n; }
+      const r = Core.measureParallax(live, cap.thumbs[ref], C, cap.thumbs[ref].C2W, cap.fRatio * Math.max(cap.lw, cap.lh), { r: 20, gx: 6, gy: 8, t: 6, minScore: 0.7 });
+      const same = cap.plx.ref === ref;
+      if (r.ok) {
+        cap.plx.val = cap.plx.val == null || !same ? r.parallax : cap.plx.val * 0.5 + r.parallax * 0.5; cap.plx.n = r.n;
+        // поправка призрака к гироскопу: сглаживаем, при смене опорного кадра — сразу
+        const gf = cap.gfix, a = gf.ref === ref ? 0.5 : 1;
+        gf.tx += (r.tx - gf.tx) * a; gf.ty += (r.ty - gf.ty) * a; gf.th += (r.th - gf.th) * a; gf.ref = ref;
+      } else { cap.plx.val = null; cap.plx.n = r.n; if (!same) cap.gfix.ref = -1; }
       cap.plx.ref = ref;
       cap.plx.state = cap.plx.val == null ? 'unknown' : cap.plx.val < 1.0 ? 'ok' : cap.plx.val < 2.0 ? 'warn' : 'bad';
     }
   }
-  if (ref < 0) { cap.plx.state = 'none'; cap.plx.val = null; cap.plx.ref = -1; }
+  if (ref < 0) { cap.plx.state = 'none'; cap.plx.val = null; cap.plx.ref = -1; cap.gfix.ref = -1; }
   setPlx(cap.plx.val, cap.plx.state);
-  drawGhost(C, near ? ref : -1);
+  drawGhost(C, fwd);
   const plxBad = cap.plx.state === 'bad';
   if (plxBad && !cap.plx.badSince) cap.plx.badSince = now; if (!plxBad) cap.plx.badSince = 0;
-  if (aligned && still && !cap.busy && !plxBad && !cap.coach) cap.hold += 16; else cap.hold = Math.max(0, cap.hold - 40);
+  // автоснимок — только при идеальном совпадении: точно на точке, телефон неподвижен,
+  // и картинка совпала с соседним кадром (первый кадр сравнивать не с чем)
+  const perfectPlx = cap.frames.length === 0 || (cap.plx.state === 'ok' && cap.plx.val < 0.8 && cap.plx.n >= 6);
+  if (cap.plx.state === 'ok' && perfectPlx) { if (!cap.plx.okSince) cap.plx.okSince = now; } else cap.plx.okSince = 0;
+  const steadyOk = cap.frames.length === 0 || (cap.plx.okSince && now - cap.plx.okSince > 350);
+  const perfect = aligned && still && perfectPlx && steadyOk;
+  if (cap.auto && perfect && !cap.busy && !cap.coach) cap.hold += 16; else cap.hold = Math.max(0, cap.hold - 40);
   // цели
   cap.targets.forEach((t, i) => {
     projectToScreen(C, t.dir, p); if (p[2] < 0.2) return;
@@ -769,7 +860,7 @@ function captureLoop(now) {
   // прицел
   ctx.beginPath(); ctx.arc(cxs, cys, 26, 0, Math.PI * 2); ctx.lineWidth = 2.5; ctx.strokeStyle = aligned ? '#3fbf86' : 'rgba(255,255,255,.9)'; ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cxs - 8, cys); ctx.lineTo(cxs + 8, cys); ctx.moveTo(cxs, cys - 8); ctx.lineTo(cxs, cys + 8); ctx.lineWidth = 1.5; ctx.stroke();
-  if (cap.hold > 0) { ctx.beginPath(); ctx.arc(cxs, cys, 32, -Math.PI / 2, -Math.PI / 2 + Math.min(1, cap.hold / 380) * Math.PI * 2); ctx.lineWidth = 5; ctx.strokeStyle = '#3fbf86'; ctx.stroke(); }
+  if (cap.hold > 0) { ctx.beginPath(); ctx.arc(cxs, cys, 32, -Math.PI / 2, -Math.PI / 2 + Math.min(1, cap.hold / 480) * Math.PI * 2); ctx.lineWidth = 5; ctx.strokeStyle = '#3fbf86'; ctx.stroke(); }
   // подсказка
   const hint = $('#capHint');
   let txt;
@@ -777,12 +868,16 @@ function captureLoop(now) {
   if (doneN === cap.targets.length) txt = 'Все точки сняты. Нажмите «Собрать сферу».';
   else if (aligned && plxBad) txt = cap.plx.badSince && now - cap.plx.badSince > 4000 ? 'Не получается? Нажмите кнопку — сниму как есть' : 'Ближние предметы двоятся: верните телефон туда, где он был, и поворачивайте его вокруг камеры';
   else if (aligned && !still) txt = 'Замрите…';
-  else if (aligned) txt = 'Держите…';
+  else if (aligned && cap.auto && perfect) txt = 'Идеально, держите…';
+  else if (aligned && cap.plx.state === 'unknown') txt = 'Мало деталей — совместите контуры и нажмите кнопку';
+  else if (aligned && cap.plx.state === 'warn') txt = 'Почти: подвиньте телефон, чтобы контуры совпали';
+  else if (aligned) txt = cap.auto ? 'Совместите контуры — сниму сам, или нажмите кнопку' : 'Совместите контуры и нажмите кнопку';
   else if (best >= 0 && cap.targets[best].pole) txt = cap.targets[best].dir[2] > 0 ? 'Поднимите телефон прямо вверх, на потолок' : 'Направьте телефон прямо вниз, на пол';
   else if (cap.frames.length === 0) txt = 'Наведите кружок в центре на ближайшую точку';
+  else if (cap.thumbs.length && cap.ghostMode < 2) txt = 'Ведите к точке. Розовое — прошлый кадр';
   else txt = 'Поворачивайте телефон вокруг объектива, не вокруг себя';
   if (hint.textContent !== txt) hint.textContent = txt;
-  if (cap.hold >= 380 && !cap.busy) { cap.hold = 0; doCapture(best); }
+  if (cap.hold >= 480 && !cap.busy) { cap.hold = 0; doCapture(best); }
   drawMinimap(fwd);
 }
 function drawMinimap(fwd) {
@@ -840,35 +935,47 @@ async function doCapture(targetIdx) {
     const blob = await new Promise(r => pick.canvas.toBlob(r, 'image/jpeg', 0.93));
     // цель — ближайшая к направлению снимка
     if (targetIdx < 0) {
-      const fw = Core.camForward(pick.C2W); let bi = -1, ba = 4 * D2R;
-      cap.targets.forEach((t, i) => { if (t.done) return; const an = Math.acos(Math.min(1, t.dir[0] * fw[0] + t.dir[1] * fw[1] + t.dir[2] * fw[2])); if (an < ba) { ba = an; bi = i; } });
-      targetIdx = bi;
+      // ручной снимок засчитываем ближайшей точке, если она ещё не снята и рядом (до 10°)
+      const fw = Core.camForward(pick.C2W); let bi = -1, ba = 10 * D2R;
+      cap.targets.forEach((t, i) => { const an = Math.acos(Math.min(1, t.dir[0] * fw[0] + t.dir[1] * fw[1] + t.dir[2] * fw[2])); if (an < ba) { ba = an; bi = i; } });
+      targetIdx = bi >= 0 && !cap.targets[bi].done ? bi : -1;
     }
     if (targetIdx >= 0) cap.targets[targetIdx].done = true;
-    cap.frames.push({ blob, w: cap.fw, h: cap.fh, C2W: pick.C2W, target: targetIdx, plx: cap.plx.val });
-    {
-      const c = document.createElement('canvas'); c.width = cap.lw; c.height = cap.lh; const x = c.getContext('2d', { willReadFrequently: true });
-      x.drawImage(pick.canvas, 0, 0, cap.lw, cap.lh);
-      const d = x.getImageData(0, 0, cap.lw, cap.lh).data, g = new Float32Array(cap.lw * cap.lh);
-      for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
-      cap.thumbs.push({ w: cap.lw, h: cap.lh, g, rgba: d, C2W: pick.C2W });
-    }
-    cap.plx.val = null; cap.plx.state = 'none';
+    cap.frames.push({ blob, w: cap.fw, h: cap.fh, C2W: pick.C2W, target: targetIdx, plx: cap.plx.val, cam: cap.camInfo });
+    cap.thumbs.push(makeThumb(pick.canvas, pick.C2W));
+    cap.plx.val = null; cap.plx.state = 'none'; cap.plx.okSince = 0;
     markCoverage(pick.C2W); updateCapHud();
-    if (cap.frames.length === 1 && $('#optLock').checked) lockExposure();
+    if (cap.frames.length === 1 && $('#optLock').checked) await lockCamera();
   } finally { cap.busy = false; }
 }
-async function lockExposure() {
-  const tr = cap.track; if (!tr || !tr.getCapabilities) return;
-  try {
-    const caps = tr.getCapabilities(), set = tr.getSettings(), adv = {};
-    if (caps.exposureMode && caps.exposureMode.includes('manual') && set.exposureTime) { adv.exposureMode = 'manual'; adv.exposureTime = set.exposureTime; }
-    if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('manual') && set.colorTemperature) { adv.whiteBalanceMode = 'manual'; adv.colorTemperature = set.colorTemperature; }
-    if (!Object.keys(adv).length) { $('#capExp').textContent = 'экспозиция: выровняю'; return; }
-    await tr.applyConstraints({ advanced: [adv] });
-    const s2 = tr.getSettings();
-    if (s2.exposureMode === 'manual' || s2.whiteBalanceMode === 'manual') { $('#capExp').textContent = 'экспозиция: фикс'; $('#capExp').classList.add('ok'); }
-  } catch (e) { $('#capExp').textContent = 'экспозиция: выровняю'; }
+// фиксация яркости, баланса белого и фокуса на время съёмки (что разрешит браузер).
+// Каждую настройку пробуем отдельно: отказ в одной не мешает другим. Итог пишем в архив кадров.
+async function lockCamera() {
+  const tr = cap.track, info = cap.camInfo = { caps: null, before: null, tried: [], after: null };
+  if (!tr) return;
+  try { info.caps = tr.getCapabilities ? tr.getCapabilities() : null; } catch (e) { info.caps = 'err: ' + e.message; }
+  try { info.before = tr.getSettings(); } catch (e) { }
+  const caps = (info.caps && typeof info.caps === 'object') ? info.caps : {}, set = info.before || {};
+  const has = (k, v) => Array.isArray(caps[k]) && caps[k].includes(v);
+  const plan = [];
+  if (has('exposureMode', 'manual')) { const c = { exposureMode: 'manual' }; if (set.exposureTime) c.exposureTime = set.exposureTime; if (set.iso) c.iso = set.iso; plan.push(['exp', c]); }
+  else if (has('exposureMode', 'single-shot')) plan.push(['exp', { exposureMode: 'single-shot' }]);
+  if (has('whiteBalanceMode', 'manual')) { const c = { whiteBalanceMode: 'manual' }; if (set.colorTemperature) c.colorTemperature = set.colorTemperature; plan.push(['wb', c]); }
+  else if (has('whiteBalanceMode', 'single-shot')) plan.push(['wb', { whiteBalanceMode: 'single-shot' }]);
+  if (has('focusMode', 'manual')) { const c = { focusMode: 'manual' }; if (set.focusDistance) c.focusDistance = set.focusDistance; plan.push(['focus', c]); }
+  else if (has('focusMode', 'single-shot')) plan.push(['focus', { focusMode: 'single-shot' }]);
+  const ok = {};
+  for (const [key, c] of plan) {
+    try { await tr.applyConstraints({ advanced: [c] }); info.tried.push({ key, c, ok: true }); ok[key] = true; }
+    catch (e) { info.tried.push({ key, c, ok: false, err: String(e && e.message || e) }); }
+  }
+  try { info.after = tr.getSettings(); } catch (e) { }
+  const a = info.after || {}, fixed = m => m === 'manual' || m === 'single-shot' || m === 'none';
+  const expFixed = ok.exp && fixed(a.exposureMode), wbFixed = ok.wb && fixed(a.whiteBalanceMode);
+  const el = $('#capExp');
+  if (expFixed) { el.textContent = wbFixed ? 'яркость и цвет: фикс' : 'яркость: фикс'; el.classList.add('ok'); }
+  else if (wbFixed) { el.textContent = 'цвет: фикс · яркость: выровняю'; el.classList.add('ok'); }
+  else el.textContent = 'яркость: выровняю при склейке';
 }
 
 async function decodeFrames(frames) {
@@ -1303,6 +1410,7 @@ $('#tFrames').addEventListener('click', async () => {
     const f = lastFrames[i], name = `frame_${String(i).padStart(2, '0')}.jpg`;
     files.push({ name, data: new Uint8Array(await f.blob.arrayBuffer()) });
     meta.frames.push({ file: name, w: f.w, h: f.h, C2W: Array.from(f.C2W), target: f.target, plx: f.plx });
+    if (!meta.cam && f.cam) meta.cam = f.cam;
   }
   if (view.res) meta.stats = view.res.stats;
   files.push({ name: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta, null, 1)) });

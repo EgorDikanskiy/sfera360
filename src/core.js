@@ -494,11 +494,17 @@ function measureParallax(live, ref, C2Wl, C2Wr, f, opts) {
   if (vecs.length < 4) return { ok: false, n: vecs.length };
   const xs = vecs.map(v => v[0]).sort((a, b) => a - b), ys = vecs.map(v => v[1]).sort((a, b) => a - b);
   const mx = xs[xs.length >> 1], my = ys[ys.length >> 1];
-  const res = vecs.map(v => Math.hypot(v[0] - mx, v[1] - my)).sort((a, b) => a - b);
+  // поворот плоскости кадра (ошибка гироскопа по крену) — это не параллакс, вычитаем его
+  const ths = [];
+  for (const v of vecs) { const rx = v[3] - cxl, ry = v[4] - cyl, r2 = rx * rx + ry * ry; if (r2 > 0.0225 * live.w * live.w) ths.push((rx * (v[1] - my) - ry * (v[0] - mx)) / r2); }
+  ths.sort((a, b) => a - b);
+  const th = ths.length >= 3 ? ths[ths.length >> 1] : 0;
+  const res = vecs.map(v => Math.hypot(v[0] - mx + th * (v[4] - cyl), v[1] - my - th * (v[3] - cxl))).sort((a, b) => a - b);
   // разброс: 80-й перцентиль отклонений (до 1 px — это просто точность измерения)
   const spread = res[Math.min(res.length - 1, Math.floor(res.length * 0.8))];
   const toDeg = 180 / Math.PI / f;
-  return { ok: true, n: vecs.length, gyroErr: Math.hypot(mx, my) * toDeg, parallax: Math.max(0, spread - 0.7) * toDeg, vecs };
+  // tx, ty, th: поправка к гироскопу — где искать живую картинку в опорном кадре: x + t + th·(−(y−cy), x−cx)
+  return { ok: true, n: vecs.length, gyroErr: Math.hypot(mx, my) * toDeg, parallax: Math.max(0, spread - 0.7) * toDeg, vecs, tx: mx, ty: my, th };
 }
 
 // ───────────────────────── связка (bundle adjustment по лучам) ─────────────────────────
